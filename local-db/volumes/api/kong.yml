@@ -1,0 +1,110 @@
+_format_version: '2.1'
+_transform: true
+
+# Minimal Spectre gateway — only the two upstreams the local stack runs:
+# PostgREST (the data API) and Realtime. Auth / Storage / Functions / Studio /
+# Analytics / pg-meta routes from the full Supabase self-host are removed (Spectre
+# uses CORE_TOKEN, not Supabase auth, and those containers aren't started).
+#
+# Keys are legacy HS256 JWTs (signed from JWT_SECRET) that ARE the bearer tokens,
+# so no asymmetric-key request-transformer is needed: key-auth identifies the
+# consumer from the `apikey` header/query; the client's `Authorization: Bearer
+# <jwt>` passes straight through to PostgREST / Realtime, which derive the role
+# from the JWT.
+
+consumers:
+  - username: anon
+    keyauth_credentials:
+      - key: $SUPABASE_ANON_KEY
+  - username: service_role
+    keyauth_credentials:
+      - key: $SUPABASE_SERVICE_KEY
+
+acls:
+  - consumer: anon
+    group: anon
+  - consumer: service_role
+    group: admin
+
+# Rate-limiting scoped to the anon consumer ONLY.
+# The service-role consumer (Spectre core) is intentionally unthrottled:
+# it runs chat-runner polling (~1 req/s), dream consolidation, embedding
+# backfills, and concurrent chat sessions — all legitimate high-frequency
+# internal traffic that a 600/min cap would break.
+# The public-exposure risk is the ANON key being leaked, so we cap that
+# path alone: 600 req/min (10 req/s burst) + 20 000 req/hour.
+# policy: local — no Redis needed; counters are in-process (single Kong node).
+plugins:
+  - name: rate-limiting
+    consumer: anon
+    config:
+      minute: 600
+      hour: 20000
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+services:
+  ## PostgREST — /rest/v1/* -> http://rest:3000/*
+  - name: rest-v1
+    url: http://rest:3000/
+    routes:
+      - name: rest-v1-all
+        strip_path: true
+        paths:
+          - /rest/v1/
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon
+
+  ## Realtime websocket — /realtime/v1/* -> http://realtime-dev.supabase-realtime:4000/socket/*
+  ## Upstream host's first label (realtime-dev) selects the seeded tenant.
+  ## Plain http service: Kong proxies the WS Upgrade transparently (native
+  ## `protocol: ws` services bypass consumer/acl resolution for query-string keys).
+  - name: realtime-v1-ws
+    url: http://realtime-dev.supabase-realtime:4000/socket
+    routes:
+      - name: realtime-v1-ws
+        strip_path: true
+        paths:
+          - /realtime/v1/
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon
+
+  ## Realtime REST (broadcast / presence over HTTP) — /realtime/v1/api/* -> http://realtime-dev.supabase-realtime:4000/api/*
+  - name: realtime-v1-rest
+    url: http://realtime-dev.supabase-realtime:4000/api
+    protocol: http
+    routes:
+      - name: realtime-v1-rest
+        strip_path: true
+        paths:
+          - /realtime/v1/api
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon

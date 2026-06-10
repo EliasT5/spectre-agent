@@ -1,0 +1,255 @@
+# Spectre — the full product stack (open-core).
+#
+#   shell  (built here, public)  ── /api proxy ──>  core (opaque image, loopback)
+#                                                    ├─ chat-runner (durable chat)
+#                                                    └─ scheduler  (nightly maint.)
+#
+# The core/chat-runner/scheduler all run the SAME pre-built opaque `spectre-core`
+# image (the moat — distributed as an artifact, never source). The shell is built
+# locally from this public repo; it bakes in NO storage credentials (the browser
+# only ever talks to /api/*). One `.env.docker` (written by
+# `installer/install.mjs`) feeds every service. Ollama runs on the host
+# (host.docker.internal). The shell is the only front door; core stays loopback.
+name: spectre
+
+services:
+  # Provider-agnostic model gateway — the STANDARD brain backend. Your own keys /
+  # self-hosted models (litellm-config.yaml); the core talks only to this. Loopback.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    volumes:
+      # :Z relabels for SELinux-enforcing hosts (Fedora/RHEL); ignored elsewhere.
+      - "./litellm-config.yaml:/app/config.yaml:ro,Z"
+    env_file: [.env.docker]
+    environment:
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:-sk-spectre}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:4000:4000"
+    restart: unless-stopped
+
+  core:
+    image: ${SPECTRE_CORE_IMAGE:-ghcr.io/eliast5/spectre-core:latest}
+    env_file: [.env.docker]
+    environment:
+      PORT: "8787"
+      HOSTNAME: "0.0.0.0"
+      OLLAMA_HOST: "http://host.docker.internal:11434"
+      SPECTRE_MCP_BROKER: "1"
+      # The core is a compiled binary, so it spawns the broker BINARY (not node+.mjs).
+      SPECTRE_MCP_BROKER_BIN: "/app/dist/spectre-broker"
+      SPECTRE_APP_URL: "http://127.0.0.1:8787"
+      # Standard brain → the bundled LiteLLM gateway.
+      SPECTRE_LITELLM_URL: "http://litellm:4000/v1"
+      SPECTRE_LITELLM_KEY: "${LITELLM_MASTER_KEY:-sk-spectre}"
+      SPECTRE_LITELLM_MODEL: "${SPECTRE_LITELLM_MODEL:-spectre-default}"
+      # Only effective on a Claude-capable (SPECTRE_CLAUDE=1) core image — personal use.
+      SPECTRE_ALLOW_CLAUDE_CLI: "${SPECTRE_ALLOW_CLAUDE_CLI:-}"
+      # Screenshot tool → the Playwright shotter sidecar (only up with --profile screenshot);
+      # default capture target is the shell UI (authed pages need SPECTRE_SHOTTER_COOKIE).
+      SPECTRE_SHOTTER_URL: "http://shotter:8008/shot"
+      SPECTRE_SHELL_URL: "http://shell:3100"
+      # Persistent, user-extensible harness dir: drop skills/, tools/, mcp/ into
+      # ./spectre-data on the host and they overlay the baked built-ins + survive
+      # restarts/re-pulls (the brain reads them live). See docs + installer.
+      SPECTRE_DATA_DIR: "/data"
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - "${SPECTRE_DATA_DIR_HOST:-./spectre-data}:/data"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [litellm]
+    restart: unless-stopped
+
+  chat-runner:
+    image: ${SPECTRE_CORE_IMAGE:-ghcr.io/eliast5/spectre-core:latest}
+    command: ["/app/dist/spectre-chat-runner"]
+    env_file: [.env.docker]
+    environment:
+      SPECTRE_APP_URL: "http://core:8787"
+    # Reaches the host for Ollama + the local self-hosted DB gateway
+    # (SUPABASE_URL=http://host.docker.internal:8000). Required on Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [core]
+    restart: unless-stopped
+
+  scheduler:
+    image: ${SPECTRE_CORE_IMAGE:-ghcr.io/eliast5/spectre-core:latest}
+    command: ["/app/dist/spectre-scheduler"]
+    env_file: [.env.docker]
+    environment:
+      SPECTRE_APP_URL: "http://core:8787"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [core]
+    restart: unless-stopped
+
+  # Messaging channels: delivers finished assistant replies back out over the
+  # channel (Telegram / WhatsApp). Inbound is the core's /api/channels webhook.
+  # Active when TELEGRAM_BOT_TOKEN or WHATSAPP_TOKEN is set in .env.docker;
+  # otherwise it idles harmlessly. All channel env flows in via env_file.
+  channel-runner:
+    image: ${SPECTRE_CORE_IMAGE:-ghcr.io/eliast5/spectre-core:latest}
+    command: ["/app/dist/spectre-channel-runner"]
+    env_file: [.env.docker]
+    environment:
+      # Fetch generated images (screenshots) from the core to deliver as photos.
+      SPECTRE_APP_URL: "http://core:8787"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [core]
+    restart: unless-stopped
+
+  # Screenshot capture (headless Chromium / Playwright). Opt-in — only runs with
+  # `docker compose --profile screenshot up` so the base install carries no ~400MB
+  # Chromium layer. The core's `screenshot` tool POSTs to it on the compose network.
+  shotter:
+    build: ./screenshot-sidecar
+    profiles: ["screenshot"]
+    expose: ["8008"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # The public shell — built locally; holds no storage credentials (the browser
+  # rides /api/* through the proxy only).
+  # Behind the `ui` profile so a HEADLESS install (core + channels + API only)
+  # can leave it out; the installer sets COMPOSE_PROFILES per the chosen profile.
+  shell:
+    profiles: ["ui"]
+    build:
+      context: .
+      args:
+        # Where the Workspaces tab loads the embedded VS Code editor (NEXT_PUBLIC_*
+        # is inlined at build time). Default "/code" = same-origin via the edge
+        # proxy; override to e.g. http://localhost:8088 for a direct loopback editor.
+        # (No Supabase build args: the browser talks only to /api/* — storage
+        # credentials never reach the shell image.)
+        NEXT_PUBLIC_CODE_SERVER_URL: "${NEXT_PUBLIC_CODE_SERVER_URL:-/code}"
+    image: spectre-shell
+    env_file: [.env.docker]
+    environment:
+      PORT: "3100"
+      HOSTNAME: "0.0.0.0"
+      NODE_ENV: "production"
+      CORE_URL: "http://core:8787"
+      # /api/workspace/* is proxied here (only resolves when the workspace profile
+      # is up); WORKSPACE_SERVICE_TOKEN flows in via env_file.
+      WORKSPACE_URL: "http://workspace:8010"
+    # Loopback by default — localhost is a secure context so the PIN cookie sets.
+    # For tailnet access put it behind HTTPS (`tailscale serve https / → :3100`),
+    # else the Secure session cookie is dropped over plain HTTP. See M6-INSTALLER.
+    ports:
+      - "${SHELL_BIND:-127.0.0.1}:${SHELL_PORT:-3100}:3100"
+    depends_on: [core]
+    restart: unless-stopped
+
+  # Self-evolution (opt-in: `--profile self-evolve`). Mounts the target repo to
+  # edit — the public shell/modules, NEVER the core (the worker refuses the core).
+  worker:
+    image: ${SPECTRE_CORE_IMAGE:-ghcr.io/eliast5/spectre-core:latest}
+    command: ["/app/dist/spectre-worker"]
+    profiles: ["self-evolve"]
+    env_file: [.env.docker]
+    environment:
+      SPECTRE_APP_URL: "http://core:8787"
+      SPECTRE_REPO_PATH: "/target"
+      SPECTRE_BASE_BRANCH: "${SPECTRE_BASE_BRANCH:-main}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "${SPECTRE_TARGET_REPO:-./target-repo}:/target"
+    depends_on: [core]
+    restart: unless-stopped
+
+  # In-browser code Workspaces (opt-in: `--profile workspace`). Two modes:
+  # sandbox repo clones (→ commit → PR → close) and TRUSTED local folders
+  # (edit/commit/push in place). Bundles git + gh + ripgrep and runs untrusted
+  # repo code (npm test / shell), so it is OFF by default and reachable ONLY
+  # through the PIN-gated shell, which injects WORKSPACE_SERVICE_TOKEN.
+  #
+  # ⚠ RISK — be explicit about what this profile is: file edit + terminal on
+  # every bind-mounted trusted folder = remote code execution on those host
+  # paths for anyone past the gates. The gates are the shell PIN (edge) + the
+  # service token; defense-in-depth below: non-root user, all capabilities
+  # dropped, no privilege re-escalation. NEVER move CODE_SERVER_BIND/EDGE_BIND
+  # off loopback without HTTPS in front.
+  workspace:
+    build: ./workspace-service
+    profiles: ["workspace"]
+    env_file: [.env.docker]
+    environment:
+      PORT: "8010"
+      WORKSPACE_ROOT: "/workspaces"
+      # WORKSPACE_SERVICE_TOKEN, GH_TOKEN, WORKSPACE_TRUSTED_DIRS come from .env.docker.
+    expose: ["8010"]
+    volumes:
+      - "spectre-workspaces:/workspaces"
+      # TRUSTED folders: bind-mount each host path listed in WORKSPACE_TRUSTED_DIRS
+      # to the SAME path inside the container (code-server needs it too). e.g.:
+      # - "/home/me/project:/home/me/project"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  # The Workspaces editor: code-server (VS Code in the browser) sharing the same
+  # volume so it edits the same files. Opt-in with `--profile workspace`.
+  # Defense-in-depth auth: the shell PIN at the edge is the primary gate, but the
+  # editor ALSO requires its own password (CODE_SERVER_PASSWORD, generated by the
+  # installer) so a slipped bind/edge misconfig doesn't expose a passwordless
+  # terminal. If the password is unset, code-server falls back to a random one in
+  # its container config (locked out = fail closed); set CODE_SERVER_AUTH=none
+  # only if you understand you're back to PIN-only protection.
+  code-server:
+    image: codercom/code-server:latest
+    profiles: ["workspace"]
+    command: ["--auth", "${CODE_SERVER_AUTH:-password}", "--disable-telemetry", "--bind-addr", "0.0.0.0:8080", "/workspaces"]
+    environment:
+      PASSWORD: "${CODE_SERVER_PASSWORD:-}"
+    expose: ["8080"]
+    volumes:
+      - "spectre-workspaces:/workspaces"
+      # Mirror the same trusted-folder bind-mounts here so the editor can open them.
+    ports:
+      - "${CODE_SERVER_BIND:-127.0.0.1}:${CODE_SERVER_PORT:-8088}:8080"
+    # The image ships passwordless sudo for the coder user; no-new-privileges
+    # blocks that escalation and ALL caps are dropped (terminals/git don't need any).
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  # Edge proxy (opt-in: `--profile workspace`). A same-origin front door so the
+  # Workspaces tab can iframe code-server: routes /code/* → code-server (handles
+  # the WebSocket upgrade a Next route can't) and everything else → the shell.
+  # Access Spectre via THIS (default http://127.0.0.1:8090) to use the editor.
+  # For HTTPS/tailnet set SPECTRE_SITE_ADDRESS to your domain + publish 80/443
+  # (Caddy auto-TLS, which also satisfies the Secure-cookie requirement).
+  # See deploy/Caddyfile. NOTE: validate on a live Linux Docker host.
+  edge:
+    image: caddy:2
+    profiles: ["workspace"]
+    environment:
+      # Forwarded to the Caddyfile's {$SPECTRE_SITE_ADDRESS} site block. Default
+      # ":8090" = plain HTTP on 8090; set to a domain for Caddy auto-TLS.
+      SPECTRE_SITE_ADDRESS: "${SPECTRE_SITE_ADDRESS:-:8090}"
+    volumes:
+      - "./deploy/Caddyfile:/etc/caddy/Caddyfile:ro,Z"
+      - "caddy-data:/data"
+      - "caddy-config:/config"
+    ports:
+      - "${EDGE_BIND:-127.0.0.1}:${EDGE_PORT:-8090}:8090"
+    # No depends_on the shell (it's in the `ui` profile — a cross-profile dep would
+    # error under `--profile workspace` alone); Caddy resolves upstreams lazily.
+    depends_on: [code-server]
+    restart: unless-stopped
+
+volumes:
+  spectre-workspaces:
+  caddy-data:
+  caddy-config:

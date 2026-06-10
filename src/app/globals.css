@@ -1,0 +1,988 @@
+/* ============================================================================
+   SPECTRE shell — the Spectre design system.
+   Palette + type + glass + noise define the product look: indigo accent, near-black
+   surfaces, Outfit/Inter/JetBrains Mono, a subtle film-noise layer, and the
+   indigo→violet→purple gradient text. Class names match the shell's components.
+   ========================================================================== */
+
+:root {
+  /* Base surfaces (Spectre) */
+  --color-bg:               #050507;
+  --color-bg-alt:           #0a0a12;
+  --color-surface:          #0f0f1a;
+  --color-surface-hover:    #16162a;
+  --color-surface-elevated: #1a1a2e;
+
+  /* Text */
+  --color-text:             #eeeef0;
+  --color-text-secondary:   #c8c8d0;
+  --color-text-muted:       #8888a0;
+
+  /* Accent — indigo primary */
+  --color-accent:           #6366f1;
+  --color-accent-hover:     #818cf8;
+  --color-accent-deep:      #4f46e5;
+
+  /* Hairlines */
+  --color-border:           rgba(255, 255, 255, 0.06);
+  --color-border-hover:     rgba(255, 255, 255, 0.12);
+
+  /* Gradient stops (indigo → violet → purple → pink) */
+  --grad-start:  #6366f1;
+  --grad-mid:    #8b5cf6;
+  --grad-end:    #a855f7;
+  --grad-accent: #ec4899;
+
+  /* Glows */
+  --glow-primary:   rgba(99, 102, 241, 0.4);
+  --glow-secondary: rgba(168, 85, 247, 0.3);
+  --glow-pink:      rgba(236, 72, 153, 0.3);
+
+  /* Semantic */
+  --color-error:   #ef4444;
+  --color-success: #22c55e;
+  --color-warn:    #e8b94a;
+
+  /* ── aliases used across the shell's component CSS ── */
+  --void: var(--color-bg);
+  --abyss: var(--color-bg-alt);
+  --glass: rgba(10, 10, 18, 0.56);
+  --glass-2: rgba(15, 15, 26, 0.66);
+  --hairline: var(--color-border);
+  --hairline-2: var(--color-border-hover);
+  --edge-hi: rgba(255, 255, 255, 0.10);
+  --ink: var(--color-text);
+  --ink-2: var(--color-text-secondary);
+  --ink-3: var(--color-text-muted);
+  --ink-faint: #5b5b75;
+  --accent: var(--color-accent);
+  --accent-bright: var(--color-accent-hover);
+  --accent-deep: var(--color-accent-deep);
+  --magenta: var(--grad-accent);
+  --danger: var(--color-error);
+
+  --glow: 0 0 24px var(--glow-primary), 0 0 64px var(--glow-secondary);
+  --glow-sm: 0 0 16px var(--glow-primary);
+  --glow-soft: 0 12px 48px rgba(0, 0, 0, 0.35), 0 4px 16px rgba(0, 0, 0, 0.2);
+  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  --ring-hi: 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+
+  --r-sm: 9px;
+  --r: 12px;
+  --r-lg: 18px;
+  --pill: 999px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --font-display: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* PWA polish: kill the grey tap flash + the rubber-band overscroll that looks
+     broken once installed standalone. Harmless in a normal browser tab too. */
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+/* Ambient bloom — Spectre's three soft radial glows (indigo top, purple bottom-
+   right, pink bottom-left). The atmosphere every tab floats over. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(80% 52% at 50% -12%, rgba(99, 102, 241, 0.10), transparent 62%),
+    radial-gradient(60% 40% at 86% 108%, rgba(168, 85, 247, 0.07), transparent 60%),
+    radial-gradient(60% 40% at 14% 108%, rgba(236, 72, 153, 0.05), transparent 60%);
+}
+
+/* Spectre's film-noise layer (mounted in layout). */
+.noise-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.018;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection { background: var(--color-accent); color: #fff; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-accent); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-accent-hover); }
+
+/* ── typography ──────────────────────────────────────────────────────────── */
+h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; margin: 0; }
+
+.gradient-text {
+  background: linear-gradient(135deg, var(--grad-start), var(--grad-mid), var(--grad-end));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.muted { color: var(--color-text-muted); }
+.mono { font-family: var(--font-mono); }
+
+/* ── glass (Spectre's recipe) ────────────────────────────────────────────── */
+.glass, .card, .panel {
+  position: relative;
+  background: var(--glass);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r);
+  backdrop-filter: blur(28px) saturate(180%) brightness(1.04);
+  -webkit-backdrop-filter: blur(28px) saturate(180%) brightness(1.04);
+  box-shadow: var(--ring-hi), var(--glow-soft), var(--inset-hi);
+}
+
+/* ============================================================================
+   KIT
+   ========================================================================== */
+/* Living tab atmosphere — the WebGL field sits behind everything; content
+   wrappers lift above it so the glass reads over the drift. */
+.route-atmo {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  animation: atmoIn 0.9s var(--ease-out) both;
+}
+@keyframes atmoIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Per-route entrance (app/template.tsx remounts on navigation). Opacity ONLY —
+   no transform/filter — so the fixed-positioned blob, marks and overlays keep
+   their viewport anchoring during the fade. */
+.route-fade { animation: routeFade 0.42s var(--ease-out) both; }
+@keyframes routeFade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .route-fade { animation: none; }
+}
+
+.tab, .shell {
+  max-width: 860px;
+  margin: 0 auto;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 1;
+}
+.chat-layout, .pin-wrap { position: relative; z-index: 1; }
+
+/* HUD large-title header — mono eyebrow, gradient-glow title, status line, a
+   whisper of holographic scanline behind it, closed by a gradient hairline. */
+.tabhead {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 60px 24px 14px;
+  overflow: hidden;
+}
+.tabhead::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(transparent 0 3px, rgba(126, 237, 255, 0.05) 3px, rgba(126, 237, 255, 0.05) 4px);
+  animation: scanline-drift 1.8s linear infinite;
+  mix-blend-mode: screen;
+  -webkit-mask: linear-gradient(180deg, #000, transparent 78%);
+  mask: linear-gradient(180deg, #000, transparent 78%);
+}
+.tabhead > * { position: relative; z-index: 1; }
+.tabhead-titles { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.tabhead h1 {
+  font-size: clamp(28px, 5vw, 34px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.015em;
+  background: linear-gradient(135deg, var(--grad-start), var(--grad-mid), var(--grad-end));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 0 18px rgba(99, 102, 241, 0.32));
+}
+.statusline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  padding-bottom: 3px;
+}
+.tabhead-rule { margin: 0 24px; }
+
+.tabbody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* tabbody children are revealed by framer-motion (TabShell) — the CSS stagger
+   was removed to avoid double-animating. riseIn stays for chat bubbles. */
+@keyframes riseIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.card, .panel { padding: 16px 18px; line-height: 1.55; transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease); }
+.card:hover, .panel:hover { border-color: var(--color-border-hover); box-shadow: var(--ring-hi), var(--glow-soft), var(--inset-hi), var(--glow-sm); }
+.card-meta { display: flex; gap: 7px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+
+.tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--pill);
+  padding: 3px 9px;
+  background: var(--color-accent-subtle, rgba(99, 102, 241, 0.06));
+}
+button.tag { cursor: pointer; transition: all 0.2s var(--ease); }
+button.tag:hover { border-color: var(--color-border-hover); color: var(--color-text); }
+.tag.on {
+  color: #fff;
+  border-color: var(--color-accent);
+  background: rgba(99, 102, 241, 0.18);
+  box-shadow: var(--glow-sm);
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--color-accent-hover);
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.34);
+  border-radius: var(--pill);
+  padding: 3px 9px;
+}
+
+.btn, .composer button, .error-actions button, .pin-wrap button {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #fff;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 0 20px;
+  height: 42px;
+  cursor: pointer;
+  background: var(--color-accent);
+  box-shadow: var(--inset-hi);
+  transition: background 0.2s var(--ease), box-shadow 0.2s var(--ease), transform 0.2s var(--ease);
+}
+.btn:hover, .composer button:hover:not(:disabled), .error-actions button:hover, .pin-wrap button:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  box-shadow: var(--glow-sm);
+}
+.btn:disabled, .composer button:disabled, .pin-wrap button:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+.btn.ghost, .error-actions button.ghost {
+  background: transparent;
+  border: 1px solid var(--color-border-hover);
+  color: var(--color-text);
+  box-shadow: none;
+}
+.btn.ghost:hover, .error-actions button.ghost:hover { background: var(--color-surface-hover); box-shadow: none; }
+.btn.danger { background: var(--color-error); }
+.btn.danger:hover { background: #f87171; box-shadow: 0 0 16px rgba(239, 68, 68, 0.4); }
+
+.input, .composer input, .pin-wrap input, .select {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  border-radius: var(--r-sm);
+  padding: 11px 14px;
+  font-size: 14px;
+  font-family: var(--font-body);
+  outline: none;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.input::placeholder, .composer input::placeholder { color: var(--ink-faint); }
+.input:focus, .composer input:focus, .pin-wrap input:focus, .select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+.select { width: 100%; cursor: pointer; }
+
+.field { display: flex; flex-direction: column; gap: 7px; }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; }
+.row + .row { border-top: 1px solid var(--color-border); }
+.row .v { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-secondary); }
+
+/* Stat tiles — glass mini-cards with big gradient-text, tabular numbers. */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 12px; }
+.stat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 16px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.05), rgba(15, 15, 26, 0.32));
+  overflow: hidden;
+  transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
+}
+.stat:hover { border-color: var(--color-border-hover); box-shadow: var(--glow-sm); }
+.stat .n {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(135deg, var(--grad-start), var(--grad-mid), var(--grad-end));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.stat .k { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-text-muted); }
+
+.empty, .empty-state {
+  color: var(--color-text-muted);
+  text-align: center;
+  margin: auto;
+  font-size: 14px;
+  padding: 32px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+.del { margin-left: auto; background: transparent; border: none; color: var(--ink-faint); cursor: pointer; font-size: 14px; padding: 0 4px; transition: color 0.2s var(--ease); }
+.del:hover { color: var(--danger); }
+
+/* The back-mark is self-contained (inline styles in SpectreBackButton.tsx) —
+   the holographic Spectre plaque. */
+
+/* ============================================================================
+   HOME — holographic clock + greeting (the kiosk's signature)
+   ========================================================================== */
+.home-stack {
+  position: fixed;
+  top: 6vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+  text-align: center;
+  animation: fadeDown 1.2s var(--ease-out) both;
+}
+@keyframes fadeDown { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+.holo-clock {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 300;
+  font-size: clamp(58px, 11vw, 104px);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #dffaff;
+  text-shadow:
+    -1px 0 0 rgba(255, 80, 120, 0.4),
+    1px 0 0 rgba(110, 220, 255, 0.45),
+    0 0 14px rgba(167, 139, 250, 0.55),
+    0 0 24px rgba(126, 237, 255, 0.3);
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  padding: 4px 10px;
+}
+.holo-greet {
+  font-family: Georgia, "Cormorant Garamond", "Times New Roman", serif;
+  font-style: italic;
+  font-size: clamp(16px, 2.4vw, 22px);
+  color: #c4eaff;
+  text-shadow:
+    -1px 0 0 rgba(255, 80, 120, 0.3),
+    1px 0 0 rgba(110, 220, 255, 0.35),
+    0 0 14px rgba(167, 139, 250, 0.5);
+}
+
+@keyframes holo-flicker { 0%, 100% { opacity: 1; } 18% { opacity: 0.96; } 20% { opacity: 1; } 62% { opacity: 0.93; } 64% { opacity: 1; } }
+@keyframes scanline-drift { 0% { background-position: 0 0; } 100% { background-position: 0 4px; } }
+.holo-scan { position: relative; animation: holo-flicker 5.5s ease-in-out infinite; }
+.holo-scan::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  background: repeating-linear-gradient(transparent 0, transparent 3px, rgba(126, 237, 255, 0.08) 3px, rgba(126, 237, 255, 0.08) 4px);
+  animation: scanline-drift 1.6s linear infinite;
+  mix-blend-mode: screen;
+}
+.holo-scan > * { position: relative; z-index: 3; }
+
+/* ============================================================================
+   PIN
+   ========================================================================== */
+.pin-wrap {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+.pin-wrap h1 {
+  font-family: var(--font-display);
+  font-size: 56px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  background: linear-gradient(135deg, var(--grad-start), var(--grad-mid), var(--grad-end));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  text-shadow: 0 0 40px var(--glow-primary);
+}
+.pin-wrap p { color: var(--color-text-muted); margin: 0; font-size: 13px; }
+.pin-wrap form { display: flex; gap: 10px; }
+.pin-wrap input { font-size: 20px; letter-spacing: 8px; text-align: center; width: 200px; font-family: var(--font-mono); }
+.pin-wrap .err { color: var(--danger); font-size: 12px; min-height: 16px; font-family: var(--font-mono); }
+
+/* ============================================================================
+   CHAT
+   ========================================================================== */
+.chat-layout { display: grid; grid-template-columns: 264px 1fr; height: 100dvh; }
+.threads {
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  padding: 68px 12px 14px;
+  gap: 10px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(15, 15, 26, 0.5), transparent);
+}
+.newchat {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--r-sm);
+  padding: 11px 14px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s var(--ease);
+}
+.newchat:hover { border-color: var(--color-accent); background: rgba(99, 102, 241, 0.18); }
+.thread-list { overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+.thread-item {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  padding: 9px 12px;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.18s var(--ease);
+}
+.thread-item:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.thread-item.active { background: rgba(99, 102, 241, 0.14); color: #fff; border-left-color: var(--color-accent); }
+.chat-main { display: flex; flex-direction: column; min-width: 0; }
+
+.messages { flex: 1; overflow-y: auto; padding: 28px 28px 18px; display: flex; flex-direction: column; gap: 14px; }
+.bubble {
+  padding: 13px 16px;
+  border-radius: var(--r);
+  max-width: 76%;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  line-height: 1.55;
+  font-size: 14.5px;
+  animation: riseIn 0.35s var(--ease-out) both;
+}
+.bubble.user {
+  align-self: flex-end;
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.34);
+  border-bottom-right-radius: 5px;
+}
+.bubble.assistant {
+  align-self: flex-start;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-bottom-left-radius: 5px;
+}
+.bubble.assistant.pending::after {
+  content: "";
+  display: inline-block;
+  width: 8px; height: 16px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--color-accent-hover);
+  box-shadow: 0 0 10px var(--color-accent);
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+
+.chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+
+.composer {
+  display: flex;
+  gap: 10px;
+  padding: 16px 24px 22px;
+  border-top: 1px solid var(--color-border);
+  background: linear-gradient(0deg, var(--color-bg-alt), transparent);
+}
+.composer input { flex: 1; }
+
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 8px; }
+.md pre { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--r-sm); padding: 12px; overflow-x: auto; font-size: 12.5px; }
+.md code { font-family: var(--font-mono); font-size: 0.88em; }
+.md :not(pre) > code { background: rgba(99, 102, 241, 0.12); padding: 1px 6px; border-radius: 5px; color: var(--color-accent-hover); }
+.md ul, .md ol { margin: 0 0 8px; padding-left: 20px; }
+.md a { color: var(--color-accent-hover); }
+.md h1, .md h2, .md h3 { font-size: 1.05em; margin: 12px 0 6px; }
+
+/* ============================================================================
+   ERROR tile
+   ========================================================================== */
+.error-tile { height: 100dvh; display: grid; place-items: center; padding: 24px; }
+.error-card { max-width: 460px; text-align: center; padding: 28px; }
+.error-title { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin-bottom: 10px; }
+.error-msg { color: var(--color-text-muted); font-size: 13px; margin-bottom: 20px; word-break: break-word; font-family: var(--font-mono); }
+.error-actions { display: flex; gap: 10px; justify-content: center; }
+
+/* ============================================================================
+   CUSTOMIZE console
+   ========================================================================== */
+.customize-btn {
+  position: fixed;
+  top: 16px; right: 16px;
+  z-index: 50;
+  background: var(--glass);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--pill);
+  padding: 9px 16px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(28px) saturate(180%);
+  cursor: pointer;
+  box-shadow: var(--ring-hi), var(--glow-soft);
+  transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
+}
+.customize-btn:hover { border-color: var(--color-accent); box-shadow: var(--glow-sm); }
+.customize-panel {
+  position: fixed;
+  top: 58px; right: 16px;
+  z-index: 50;
+  width: 332px;
+  max-height: 74dvh;
+  overflow-y: auto;
+  background: var(--glass-2);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  box-shadow: var(--ring-hi), var(--glow-soft);
+  animation: panelIn 0.28s var(--ease-out) both;
+}
+@keyframes panelIn { from { opacity: 0; transform: translateY(-8px) scale(0.98); } to { opacity: 1; transform: none; } }
+.cp-head { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: 0.02em; color: var(--color-text-secondary); }
+.cp-x { background: none; border: none; color: var(--color-text-muted); cursor: pointer; font-size: 15px; transition: color 0.2s; }
+.cp-x:hover { color: var(--color-accent-hover); }
+
+.cp-blob {
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--blob-color, var(--color-accent));
+  border-radius: var(--r-sm);
+  padding: 11px 12px;
+  background: var(--color-bg-alt);
+  transition: border-color 0.2s var(--ease), background 0.2s var(--ease);
+}
+.cp-blob.drop-target { border-color: var(--color-accent); background: rgba(99, 102, 241, 0.12); box-shadow: var(--glow-sm); }
+.cp-blob-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 9px; }
+.cp-blob-id { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.cp-swatch {
+  width: 16px; height: 16px;
+  border-radius: 5px;
+  border: 1px solid var(--edge-hi);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  box-shadow: 0 0 10px -2px var(--blob-color, var(--color-accent));
+  position: relative;
+  overflow: hidden;
+}
+.cp-swatch input { position: absolute; inset: -4px; opacity: 0; cursor: pointer; }
+.cp-blob-name {
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: text;
+  padding: 2px 0;
+  border-bottom: 1px solid transparent;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 0.2s;
+}
+.cp-blob-name:hover, .cp-blob-name:focus { outline: none; border-bottom-color: var(--color-border-hover); }
+.cp-blob-name.on { color: var(--color-accent-hover); }
+.cp-count { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--ink-faint); flex-shrink: 0; }
+.cp-blob-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.cp-del { font-size: 12px; opacity: 0.7; }
+.cp-del:hover { color: #f87171; opacity: 1; }
+
+.cp-slots { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; }
+.cp-slots .empty-slot { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--ink-faint); text-transform: uppercase; padding: 4px 2px; }
+.cp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent-hover);
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.34);
+  border-radius: var(--pill);
+  padding: 4px 10px;
+  cursor: grab;
+  user-select: none;
+  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease), opacity 0.15s;
+}
+.cp-chip:hover { box-shadow: var(--glow-sm); transform: translateY(-1px); }
+.cp-chip:active { cursor: grabbing; }
+.cp-chip.dragging { opacity: 0.4; }
+.cp-chip .grip { color: var(--ink-faint); font-size: 9px; letter-spacing: -1px; }
+
+.cp-add {
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px dashed var(--color-border-hover);
+  color: var(--color-text-secondary);
+  border-radius: var(--r-sm);
+  padding: 10px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+}
+.cp-add:hover { border-color: var(--color-accent); color: var(--color-text); background: rgba(99, 102, 241, 0.1); }
+.cp-hint { font-family: var(--font-mono); font-size: 10px; line-height: 1.5; color: var(--ink-faint); }
+
+/* ============================================================================
+   GLASS HUD CONSOLE — the shared instrument layer (panels, frames, telemetry)
+   ========================================================================== */
+
+/* Top sheen on a glass surface — drop as the first child of .glass/.panel. */
+.glass-fresnel {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.03) 42%, transparent 60%);
+  opacity: 0.7;
+}
+
+/* HUD corner brackets — 4 L-frames drawn with corner-pinned gradients. */
+.hud { position: relative; }
+.hud::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  pointer-events: none;
+  --c: var(--color-accent-hover);
+  --l: 12px;
+  --t: 1.5px;
+  background-image:
+    linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c)),
+    linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c)),
+    linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c)),
+    linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c));
+  background-repeat: no-repeat;
+  background-size:
+    var(--l) var(--t), var(--t) var(--l),
+    var(--l) var(--t), var(--t) var(--l),
+    var(--l) var(--t), var(--t) var(--l),
+    var(--l) var(--t), var(--t) var(--l);
+  background-position:
+    top left, top left,
+    top right, top right,
+    bottom left, bottom left,
+    bottom right, bottom right;
+  opacity: 0.5;
+  transition: opacity 0.3s var(--ease);
+}
+.hud:hover::before { opacity: 0.85; }
+
+/* Gradient hairline border that breathes brighter on hover/active. */
+.gradient-border { position: relative; }
+.gradient-border::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, var(--grad-start), var(--grad-end), var(--grad-accent));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: 0.26;
+  transition: opacity 0.35s var(--ease);
+  pointer-events: none;
+}
+.gradient-border:hover::after, .gradient-border.is-active::after { opacity: 0.85; }
+
+/* Rotating conic border for a "live / streaming" panel. */
+@property --hud-angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+.animated-border { position: relative; }
+.animated-border::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from var(--hud-angle), var(--grad-start), var(--grad-mid), var(--grad-accent), var(--grad-start));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: 0.6;
+  pointer-events: none;
+  animation: hud-rotate 4s linear infinite;
+}
+@keyframes hud-rotate { to { --hud-angle: 360deg; } }
+
+/* Divider that fades in from the edges. */
+.hairline-gradient { height: 1px; width: 100%; background: linear-gradient(90deg, transparent, var(--color-border-hover) 50%, transparent); }
+
+/* Live status dot with a pinging halo. Tone via .warn/.crit/.off. */
+.status-dot {
+  position: relative;
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px var(--glow-primary);
+  flex-shrink: 0;
+}
+.status-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  animation: ping 1.9s var(--ease) infinite;
+}
+@keyframes ping { 0% { transform: scale(1); opacity: 0.5; } 80%, 100% { transform: scale(2.6); opacity: 0; } }
+.status-dot.warn { background: var(--color-warn); box-shadow: 0 0 8px rgba(232, 185, 74, 0.5); }
+.status-dot.crit { background: var(--color-error); box-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
+.status-dot.off { background: var(--ink-faint); box-shadow: none; }
+.status-dot.off::after { display: none; }
+
+/* Thin gradient progress / weight bar. */
+.bar { height: 4px; width: 100%; border-radius: var(--pill); background: var(--color-border); overflow: hidden; }
+.bar > i { display: block; height: 100%; border-radius: var(--pill); background: linear-gradient(90deg, var(--grad-start), var(--grad-mid), var(--grad-accent)); transition: width 0.5s var(--ease); }
+
+/* Segmented control — a row of mono pills, one lit. */
+.seg { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--r-sm); background: var(--color-bg-alt); }
+.seg button {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--color-text-muted); background: transparent; border: 1px solid transparent; border-radius: 7px;
+  padding: 6px 12px; cursor: pointer; transition: color 0.18s var(--ease), background 0.18s var(--ease), border-color 0.18s var(--ease);
+}
+.seg button:hover { color: var(--color-text); }
+.seg button.on { color: var(--color-accent-hover); background: rgba(99, 102, 241, 0.12); border-color: rgba(99, 102, 241, 0.4); }
+
+/* Pill toggle — stateful on/off, not a slider. */
+.toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--color-text-secondary); background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--pill); padding: 7px 14px; cursor: pointer; transition: all 0.2s var(--ease);
+}
+.toggle:hover { border-color: var(--color-border-hover); color: var(--color-text); }
+.toggle.on { color: var(--color-accent-hover); border-color: var(--color-accent); background: rgba(99, 102, 241, 0.14); box-shadow: var(--glow-sm); }
+
+/* Accent-tinted icon well — holds a lucide icon in a panel/row header. */
+.well { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r-sm); background: rgba(99, 102, 241, 0.10); color: var(--color-accent-hover); flex-shrink: 0; }
+.well svg { width: 18px; height: 18px; }
+.well.lg { width: 44px; height: 44px; border-radius: var(--r); }
+
+/* Panel header: icon well + eyebrow + display title, optional right aside. */
+.panel-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.panel-head .titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.panel-head h2 { font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--color-text); }
+.panel-head .aside { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+
+/* Glass list row — the feed/list item (richer than .card). */
+.list-row {
+  position: relative;
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 13px 15px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  background: rgba(15, 15, 26, 0.4);
+  transition: border-color 0.2s var(--ease), background 0.2s var(--ease);
+}
+.list-row:hover { border-color: var(--color-border-hover); background: rgba(22, 22, 42, 0.5); }
+.list-row .row-head { display: flex; align-items: center; gap: 8px; }
+.list-row .when { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); letter-spacing: 0.04em; white-space: nowrap; }
+.list-row .row-body { color: var(--color-text-secondary); font-size: 13.5px; line-height: 1.5; }
+
+/* Key/value telemetry grid (config readouts). */
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; font-family: var(--font-mono); font-size: 11.5px; margin: 0; }
+.kv dt { color: var(--color-text-muted); letter-spacing: 0.04em; }
+.kv dd { margin: 0; color: var(--color-text-secondary); text-align: right; }
+
+/* Round gradient action button (add / send). */
+.fab {
+  display: grid; place-items: center;
+  width: 44px; height: 44px; border-radius: 50%;
+  border: none; cursor: pointer; color: #fff; flex-shrink: 0;
+  background: linear-gradient(135deg, var(--grad-start), var(--grad-mid));
+  box-shadow: var(--glow-sm);
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.fab:hover:not(:disabled) { box-shadow: var(--glow); transform: translateY(-1px); }
+.fab:active:not(:disabled) { transform: scale(0.95); }
+.fab:disabled { opacity: 0.4; box-shadow: none; cursor: default; }
+
+/* Micro press + shimmer skeleton. */
+.tap-press { transition: transform 0.12s ease-out; }
+.tap-press:active { transform: scale(0.97); }
+.skeleton {
+  border-radius: var(--r-sm);
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04));
+  background-size: 200% 100%;
+  animation: shimmer 1.5s var(--ease) infinite;
+}
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ── Schema-runtime widgets (Data-mode kit) ──────────────────────────────── */
+/* Danger-tinted EmptyState sibling — a failed source / action / widget. */
+.error-state {
+  color: var(--color-error);
+  border: 1px solid color-mix(in srgb, var(--color-error) 28%, transparent);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  border-radius: var(--r-sm);
+}
+
+/* Mono telemetry table — column count comes from the inline --cols var. */
+.ktable { display: flex; flex-direction: column; gap: 2px; font-family: var(--font-mono); }
+.ktable-head, .ktable-row {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
+  gap: 10px;
+  padding: 8px 10px;
+  align-items: center;
+}
+.ktable-head {
+  border-bottom: 1px solid var(--color-border);
+}
+.ktable-head .label {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.ktable-row { border-radius: var(--r-sm); transition: background 0.18s var(--ease); }
+.ktable-row:hover { background: var(--color-accent-subtle, rgba(99, 102, 241, 0.06)); }
+.ktable .v {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inline sparkline — tone-stroked via the polyline's stroke (set in JS). */
+.sparkline {
+  width: 100%;
+  height: 40px;
+  display: block;
+  filter: drop-shadow(0 0 6px var(--glow-primary));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+
+@media (max-width: 720px) {
+  .chat-layout { grid-template-columns: 1fr; }
+  .threads { display: none; }
+  .tabhead { padding: 58px 18px 12px; }
+  .tabhead-rule { margin-left: 18px; margin-right: 18px; }
+  .tabbody, .messages { padding-left: 16px; padding-right: 16px; }
+  .bubble { max-width: 88%; }
+}
+
+/* ── Installed PWA (standalone) ──────────────────────────────────────────────
+   viewport-fit=cover lets us paint under the notch / home indicator; expose the
+   safe-area insets as variables so any fixed chrome can pad itself, and inset the
+   body so nothing important hides behind the iOS home indicator. Only applies
+   once installed — a normal browser tab is untouched. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+@media all and (display-mode: standalone) {
+  body {
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+  }
+}
