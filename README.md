@@ -6,7 +6,7 @@
 
 **A self-hosted AI agent you build into exactly what you need.**
 
-**Spectre Agent** is a ghost on your machine — a self-hosted agent in a living 3D home where every capability orbits as a **module you can write yourself**. I built it to fight my own ADHD: something that remembers what matters, breaks the "starting is the hard part" inertia, and quietly runs the boring recurring stuff so I can lock in — then made it extensible so it becomes whatever *you* need. Your hardware, your models, your keys. Wear the interface, or run it headless on your server.
+**Spectre Agent** is a self-hosted AI agent that lives in a 3D home on your machine, where every capability is a *module you can write yourself*. I built it to fight my own ADHD — something that remembers what matters, runs the boring recurring tasks on its own, and helps me start instead of stall. Then I made it extensible, so it becomes whatever *you* need. Your hardware, your models, your keys.
 
 [![CI](https://github.com/EliasT5/spectre-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/EliasT5/spectre-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-5965e0.svg)](LICENSE)
@@ -35,9 +35,21 @@
 
 ---
 
+## The first ten minutes
+
+One install command, then you open `http://127.0.0.1:3100` and hit a dark lock screen — *Secure Access. Enter your PIN.* Nothing reaches the agent until you're past it.
+
+Then you're home. Not a chat box — a violet swarm of light in a near-black room, ringed by glowing orbs, one per module: Chat, Memory, Monitor, Settings, and whatever else your install brought. A holographic clock floats overhead, and Spectre greets you by the hour (*"Good morning, sir."*). Drag to swing the camera around, scroll to zoom, click an orb to drop into its tab. No wizard, no tour — the room is the welcome.
+
+The obvious first move is Chat: *"Shall we begin?"* You type into *Message Spectre…*, leave the model on Auto or pick one, and the answer streams back. When it reaches for a tool — your shell, your files, a screenshot — the call appears inline as a chip you can read, and anything sensitive waits on an Approve / Deny prompt before it runs. Walk away mid-answer and the turn finishes on the server; come back and it's done. Need the next thing? Ask now — follow-ups queue behind the one in flight.
+
+That's the whole pitch in miniature: a home you can see, an agent you can watch work, and nothing happening that you didn't allow.
+
+---
+
 > **🚧 Early development.** Spectre Agent is young and moving fast — expect rough edges, breaking changes, and features that aren't finished yet. Kick the tires, file issues, and help shape it; just don't trust it with anything critical for now.
 
-_On the name: this is **Spectre Agent** — a ghost that lives on your machine and answers only to you (that's the tagline). It has **no relation** to the [Spectre CPU vulnerability](https://en.wikipedia.org/wiki/Spectre_%28security_vulnerability%29); the name is about the ghost, not the exploit._
+_On the name: this is **Spectre Agent** — a ghost that lives on your machine and answers only to you (that's the tagline). It has no relation to the [Spectre CPU vulnerability](https://en.wikipedia.org/wiki/Spectre_%28security_vulnerability%29); the name is about the ghost, not the exploit._
 
 ## Quick Install
 
@@ -100,7 +112,49 @@ Whoever wrote it, every module gets the same deal:
 - **Signed manifests.** An ed25519 keyring (`SPECTRE_MODULE_TRUSTED_KEYS`) verifies who made it. Tampered or unsigned? Refused.
 - **Drop-in install.** Put it in the data dir. The registry checks the manifest before anything wakes up.
 
-Build your first one: [`docs/MODULES.md`](docs/MODULES.md).
+### Here's a real one
+
+This is **Tally**, a tiny counter built with no code at all — just a manifest. An id, a private data store, and a UI written as data:
+
+```json
+{
+  "schemaVersion": 2,
+  "id": "tally",
+  "label": "Tally",
+  "version": "0.1.0",
+  "route": "/m/tally",
+  "icon": "ListChecks",
+  "uiMode": "data",
+  "permissions": { "data": "rw" },
+  "backend": {
+    "routes": [
+      { "method": "POST", "path": "/tick",   "binding": "data.append",
+        "args": { "collection": "ticks", "doc": { "at": "{date}", "note": "{body.note}" } } },
+      { "method": "GET",  "path": "/recent", "binding": "data.rows",
+        "args": { "collection": "ticks", "limit": 50 } }
+    ]
+  },
+  "ui": { "schema": {
+    "version": 2,
+    "title": "Tally",
+    "data":    { "recent": { "source": "module", "endpoint": "/recent" } },
+    "actions": { "tick": { "steps": [
+      { "step": "module", "endpoint": "/tick", "method": "POST", "body": "@form:note" },
+      { "step": "refetch", "names": ["recent"] }
+    ] } },
+    "body": [
+      { "kind": "form",      "fields":  [ { "bind": "note", "label": "Note", "placeholder": "what happened?" } ] },
+      { "kind": "actionRow", "buttons": [ { "label": "Tally", "action": "tick", "variant": "primary" } ] },
+      { "kind": "list", "from": "recent.items", "empty": "No ticks yet.",
+        "rowHead": "{{item.doc.note}}", "rowMeta": "{{item.created_at}}" }
+    ]
+  } }
+}
+```
+
+No build step, no React, no server of its own. `permissions.data: "rw"` gives it a private store walled off from every other module; the `backend` routes append and read its own rows; the `ui.schema` *is* the screen — a form, a button, and a list that re-reads itself after each tick. Drop that in your data dir and an orb named Tally appears on the blob, sandboxed and running. A module can be exactly this small — or grow into [Pulse](core/supabase/seed-pulse-demo.sql), the live-telemetry reference that does the same trick with four data sources and a polling feed.
+
+Full SDK reference: [`docs/MODULES.md`](docs/MODULES.md).
 
 ---
 
@@ -108,11 +162,11 @@ Build your first one: [`docs/MODULES.md`](docs/MODULES.md).
 
 The 3D home is a window. Close it and Spectre Agent keeps working:
 
-- **Text it.** Telegram, WhatsApp and Discord ride the same conversation engine. Replies come back to the channel, images included.
-- **Walk away.** Every turn runs on the server. Shut your laptop mid-answer; the answer finishes and waits for you.
-- **Let it run errands.** Recurring reports, check-ins, the nightly memory cleanup, all on the built-in scheduler.
-- **Script it.** The whole core is one HTTP API behind one token. cron it, pipe it, wire it into anything.
-- **Stay reachable.** It still pings your phone when something matters.
+- Text it. Telegram, WhatsApp and Discord ride the same conversation engine; replies come back to the channel, images included.
+- Walk away. Every turn runs on the server — shut your laptop mid-answer and it finishes without you.
+- Let it run errands. Recurring reports, check-ins, the nightly memory cleanup, all on the built-in scheduler.
+- Script it. The whole core is one HTTP API behind one token — cron it, pipe it, wire it into anything.
+- Stay reachable. It still pings your phone when something matters.
 
 And if you don't like this shell? Build your own. It's MIT, it holds no data, and every feature you see is an API call. Fork it, reskin it, or replace it from scratch.
 
@@ -154,7 +208,7 @@ Spectre Agent's standard brain talks to a gateway you control, with your own API
 
 > ### A note on subscriptions
 >
-> Spectre Agent can run on a personal AI subscription instead of metered API keys — scripting your own Claude / Codex / Gemini session through their CLIs, where you stay on your own subscription (this is what the vendors' own CLIs / agent SDKs are for). All three ship off by default; switch them on in the config, or toggle them live in Settings → Providers (when the core runs with `SPECTRE_ALLOW_CLI_UI=1`). **Use at your own risk:** depending on the vendor and how you use it, driving a consumer subscription this way may run against their terms and could get the account flagged — which is exactly why it's opt-in and off by default. The default brain is your own API key through the gateway, or a local model with no keys at all.
+> Spectre Agent can also run on a personal AI subscription instead of metered API keys — driving your own Claude / Codex / Gemini session through the vendor's own CLI, the way their first-party agent tools do. All three ship off by default; turn one on in the config or in Settings → Providers (with `SPECTRE_ALLOW_CLI_UI=1`). Check your provider's terms first — some don't allow it, which is why it's opt-in. Either way, the default brain stays your own API key through the gateway, or a local model with no keys at all.
 
 ---
 
