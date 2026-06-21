@@ -1,0 +1,110 @@
+[
+  { "category": "host", "name": "bash", "description": "Run a shell command on the host after approval." },
+  { "category": "host", "name": "write", "description": "Write a file after approval." },
+  { "category": "host", "name": "edit", "description": "Replace text in a file after approval." },
+  { "category": "memory", "name": "memory.add", "description": "Save a durable long-term memory." },
+  { "category": "memory", "name": "memory.search", "description": "Search Spectre's long-term memory." },
+  { "category": "memory", "name": "memory.delete", "description": "Delete an incorrect memory." },
+  { "category": "notes", "name": "note.add", "description": "Save a free-form note — a thought, idea, or observation the user dictated." },
+  { "category": "notes", "name": "note.list", "description": "List the user's notes and/or todos, with optional kind/text filters." },
+  { "category": "notes", "name": "note.delete", "description": "Permanently delete a note or todo by id." },
+  { "category": "notes", "name": "todo.add", "description": "Save a structured todo with optional deadline and priority." },
+  { "category": "notes", "name": "todo.complete", "description": "Mark a todo as done." },
+  { "category": "communication", "name": "notify", "description": "Send a push notification." },
+  { "category": "media", "name": "screenshot", "description": "Capture a screenshot of a web page and return an embeddable /generated image URL." },
+  { "category": "media", "name": "media.search", "description": "Search past screenshots and generated images by description and return embeddable URLs." },
+  { "category": "calendar", "name": "calendar.today", "description": "Read today's Microsoft 365 calendar events." },
+  { "category": "calendar", "name": "calendar.upcoming", "description": "Read upcoming Microsoft 365 calendar events." },
+  { "category": "analytics", "name": "analytics.usage", "description": "Inspect model usage and estimated cost." },
+  { "category": "interaction", "name": "questionnaire.ask", "description": "Ask the user an embedded structured questionnaire and wait for answers." },
+  { "category": "schedules", "name": "schedule.create", "description": "Create a durable scheduled job." },
+  { "category": "schedules", "name": "schedule.list", "description": "List durable scheduled jobs." },
+  { "category": "schedules", "name": "schedule.get", "description": "Get one durable scheduled job." },
+  { "category": "schedules", "name": "schedule.update", "description": "Update a durable scheduled job after approval." },
+  { "category": "schedules", "name": "schedule.run_now", "description": "Make a schedule due immediately after approval." },
+  { "category": "schedules", "name": "schedule.delete", "description": "Delete a schedule after approval." },
+  { "category": "skills", "name": "skill.read", "description": "Load the full instructions of a skill listed in the skill index." },
+  {
+    "category": "tempus",
+    "name": "tempus.timer.status",
+    "description": "Show the currently running Tempus timer, if any.",
+    "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+  },
+  {
+    "category": "tempus",
+    "name": "tempus.timer.start",
+    "description": "Start a Tempus timer for a project with an optional description.",
+    "requiresConfirmation": true,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "projectId": { "type": "string", "description": "Tempus project id to track against." },
+        "description": { "type": "string", "description": "Optional work description for the timer." }
+      },
+      "required": ["projectId"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "category": "tempus",
+    "name": "tempus.timer.stop",
+    "description": "Stop the active Tempus timer and save the resulting time entry.",
+    "requiresConfirmation": true,
+    "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+  },
+  {
+    "category": "tempus",
+    "name": "tempus.entries.today",
+    "description": "List today's completed Tempus time entries.",
+    "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+  },
+  {
+    "category": "tempus",
+    "name": "tempus.entries.search",
+    "description": "Search completed Tempus time entries by date range, project, and text.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "from": { "type": "string", "description": "Inclusive start timestamp or date." },
+        "to": { "type": "string", "description": "Inclusive end timestamp or date." },
+        "projectId": { "type": "string", "description": "Filter by Tempus project id." },
+        "q": { "type": "string", "description": "Filter by description, project name, or tag text." }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "category": "tempus",
+    "name": "tempus.projects.list",
+    "description": "List active Tempus projects with their tracked totals.",
+    "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+  },
+  {
+    "category": "tempus",
+    "name": "tempus.reports.daily",
+    "description": "Summarize Tempus tracked time for one calendar day.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "description": "Date to report as YYYY-MM-DD; defaults to today." }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "category": "tempus",
+    "name": "tempus.reports.weekly",
+    "description": "Summarize Tempus tracked time for one ISO-style Monday-start week.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "week": { "type": "string", "description": "Week as YYYY-Www or any date inside the week; defaults to this week." }
+      },
+      "additionalProperties": false
+    }
+  },
+  { "category": "orchestration", "name": "dispatch_to_model", "description": "Spectre Mode only: dispatch a self-contained text/reasoning sub-task to a specialist model." },
+  { "category": "generation", "name": "gemini.execute", "description": "Delegate a text task to the Gemini CLI." },
+  { "category": "generation", "name": "openai.image", "description": "Generate an image via Codex/OpenAI image_gen and return a /generated URL." },
+  { "category": "generation", "name": "openai.chat", "description": "Delegate a text task to a GPT model through Codex CLI." }
+]

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemastore.azurewebsites.net/schemas/json/mcp.json",
+  "mcpServers": {
+    "spectre": {
+      "command": "node",
+      "args": ["./spectre-mcp-broker/index.mjs"],
+      "env": {
+        "SPECTRE_APP_URL": "http://127.0.0.1:3000"
+      }
+    }
+  }
+}

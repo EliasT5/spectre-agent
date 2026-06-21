@@ -1,0 +1,130 @@
+/* ============================================================================
+   MONITOR tab — co-located styles (Jerome / Spectre design language).
+   Semantic CSS only — no Tailwind. No edits to globals.css.
+   The kit (TabShell, Panel, StatGrid, Stat, ListRow, etc.) provides all base
+   chrome via globals.css; these classes layer monitor-specific presentation on top.
+   ============================================================================ */
+
+/* ── Narrow the tab column to phone-width (spec: max 560px) ─────────────────
+   .tab in globals sets max-width 860px. Override here for the monitor route.
+   The wrapper div.monitor-tab is added in page.tsx so TabShell's .tab
+   inherits from a scoped ancestor without touching kit.tsx. */
+.monitor-tab {
+  display: contents; /* transparent wrapper — doesn't affect layout */
+}
+
+.monitor-tab .tab {
+  max-width: 560px;
+}
+
+/* ── Status pill in the tabhead status line ──────────────────────────────── */
+.mon-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+/* ── Panel "online / scanning / link down" inline aside ─────────────────── */
+.mon-link-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+/* ── Event log: error-severity rows get a low-alpha red tint ────────────── */
+.mon-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Transparent wrapper carries the severity modifier; the .list-row inside
+   picks up border/background overrides via the descendant selectors below. */
+.mon-event-wrap {
+  display: contents; /* no layout box — child .list-row is the visual item */
+}
+
+/* Critical rows: red tint */
+.mon-event-crit .list-row {
+  border-color: color-mix(in srgb, var(--color-error) 30%, transparent);
+  background: color-mix(in srgb, var(--color-error) 6%, rgba(15, 15, 26, 0.4));
+}
+.mon-event-crit .list-row:hover {
+  border-color: color-mix(in srgb, var(--color-error) 48%, transparent);
+  background: color-mix(in srgb, var(--color-error) 10%, rgba(22, 22, 42, 0.5));
+}
+
+/* Warning rows: amber tint */
+.mon-event-warn .list-row {
+  border-color: color-mix(in srgb, var(--color-warn) 20%, transparent);
+  background: color-mix(in srgb, var(--color-warn) 4%, rgba(15, 15, 26, 0.4));
+}
+.mon-event-warn .list-row:hover {
+  border-color: color-mix(in srgb, var(--color-warn) 36%, transparent);
+}
+
+/* Row head inside event rows */
+.mon-row-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Empty / error states ────────────────────────────────────────────────── */
+.mon-empty-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-error);
+}
+
+.mon-empty-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-success);
+}
+
+/* ── Skeleton scan placeholder ───────────────────────────────────────────── */
+.mon-skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mon-skeleton-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: center;
+  padding-top: 4px;
+  color: var(--color-text-muted);
+}
+
+/* ── Polling footer pill ─────────────────────────────────────────────────── */
+.mon-poll-footer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  padding: 5px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: rgba(15, 15, 26, 0.4);
+  align-self: center;
+}
+
+.mon-poll-icon {
+  opacity: 0.55;
+  flex-shrink: 0;
+}

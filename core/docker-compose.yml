@@ -1,0 +1,97 @@
+# Jerome core stack. One image, the brain split into its always-on processes.
+# Env comes from .env.docker (see .env.docker.example). Ollama runs on the HOST
+# (host.docker.internal). The host port binds to 127.0.0.1 only — the shell is
+# the sole front door; the core is never exposed beyond loopback.
+
+services:
+  # ── Provider-agnostic model gateway: the ToS-clean STANDARD brain backend ──
+  # OpenAI-compatible API over 100+ providers. Spectre's brain talks ONLY here, so
+  # customers bring their OWN keys/self-hosted models (litellm-config.yaml) and
+  # never a personal subscription. Loopback-only; the core reaches it as
+  # http://litellm:4000 on the compose network.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    volumes:
+      - "./litellm-config.yaml:/app/config.yaml:ro"
+    env_file: [.env.docker]
+    environment:
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:-sk-spectre}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:4000:4000"
+    restart: unless-stopped
+
+  core:
+    build:
+      context: .
+    image: spectre-core
+    env_file: [.env.docker]
+    environment:
+      PORT: "8787"
+      HOSTNAME: "0.0.0.0"
+      OLLAMA_HOST: "http://host.docker.internal:11434"
+      # Runtime opt-in for the Claude CLI (uses your own subscription).
+      SPECTRE_ALLOW_CLAUDE_CLI: "${SPECTRE_ALLOW_CLAUDE_CLI:-}"
+      SPECTRE_MCP_BROKER: "1"
+      # The core spawns the broker BINARY (it's a compiled binary itself, so it
+      # can't shell out to `node broker.mjs`). See connectBroker in litellm.ts.
+      SPECTRE_MCP_BROKER_BIN: "/app/dist/spectre-broker"
+      SPECTRE_APP_URL: "http://127.0.0.1:8787"
+      # The standard brain points at the LiteLLM gateway. Override the model via
+      # SPECTRE_LITELLM_MODEL in .env.docker (must match a litellm-config name).
+      SPECTRE_LITELLM_URL: "http://litellm:4000/v1"
+      SPECTRE_LITELLM_KEY: "${LITELLM_MASTER_KEY:-sk-spectre}"
+      SPECTRE_LITELLM_MODEL: "${SPECTRE_LITELLM_MODEL:-spectre-default}"
+    ports:
+      - "127.0.0.1:8787:8787"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [litellm]
+    restart: unless-stopped
+
+  # Durable chat executor — picks up queued turns, asks core /run.
+  chat-runner:
+    image: spectre-core
+    command: ["/app/dist/spectre-chat-runner"]
+    env_file: [.env.docker]
+    environment:
+      SPECTRE_APP_URL: "http://core:8787"
+    depends_on: [core]
+    restart: unless-stopped
+
+  # Autonomy — nightly maintenance (consolidation + health sweep) + routines.
+  scheduler:
+    image: spectre-core
+    command: ["/app/dist/spectre-scheduler"]
+    env_file: [.env.docker]
+    environment:
+      SPECTRE_APP_URL: "http://core:8787"
+    depends_on: [core]
+    restart: unless-stopped
+
+  # Messaging channels — delivers finished replies back out (Telegram). Inbound is
+  # the core's /api/channels webhook. Idles harmlessly unless TELEGRAM_BOT_TOKEN set.
+  channel-runner:
+    image: spectre-core
+    command: ["/app/dist/spectre-channel-runner"]
+    env_file: [.env.docker]
+    depends_on: [core]
+    restart: unless-stopped
+
+  # Self-evolution. Opt-in (profile) — needs a target repo (the shell/modules,
+  # NEVER the core; the worker refuses the core path). Mount it at /target.
+  worker:
+    image: spectre-core
+    command: ["/app/dist/spectre-worker"]
+    profiles: ["self-evolve"]
+    env_file: [.env.docker]
+    environment:
+      SPECTRE_APP_URL: "http://core:8787"
+      SPECTRE_REPO_PATH: "/target"
+      SPECTRE_BASE_BRANCH: "${SPECTRE_BASE_BRANCH:-main}"
+    volumes:
+      - "${SPECTRE_TARGET_REPO:-./target-repo}:/target"
+    depends_on: [core]
+    restart: unless-stopped

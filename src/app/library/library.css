@@ -1,0 +1,235 @@
+/* ============================================================================
+   LIBRARY tab — co-located styles (Jerome design language, semantic CSS only)
+   Uses only CSS custom properties defined in globals.css.
+   No Tailwind. No edits to globals.css.
+   ============================================================================ */
+
+/* ── Doc list ──────────────────────────────────────────────────────────────── */
+.lib-doc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Individual document row ───────────────────────────────────────────────── */
+.lib-doc-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  transition: border-color 0.2s var(--ease), background 0.2s var(--ease);
+}
+
+.lib-doc-row:hover {
+  border-color: var(--color-border-hover);
+  background: var(--color-surface);
+}
+
+.lib-doc-icon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.lib-doc-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.lib-doc-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-doc-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  opacity: 0.7;
+}
+
+/* ── Icon-only action buttons inside doc rows ──────────────────────────────── */
+.lib-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: color 0.18s var(--ease), border-color 0.18s var(--ease), background 0.18s var(--ease);
+}
+
+.lib-icon-btn:hover {
+  color: var(--color-accent-hover);
+  border-color: var(--color-border-hover);
+  background: var(--color-surface-hover);
+}
+
+.lib-icon-btn.danger:hover {
+  color: var(--color-error);
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* ── Media grid ────────────────────────────────────────────────────────────── */
+.lib-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+/* ── Individual media card ─────────────────────────────────────────────────── */
+.lib-media-card {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: rgba(15, 15, 26, 0.5);
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), transform 0.2s var(--ease);
+}
+
+.lib-media-card:hover {
+  border-color: var(--color-border-hover);
+  box-shadow: var(--ring-hi), var(--glow-soft);
+  transform: translateY(-2px);
+}
+
+.lib-media-img {
+  width: 100%;
+  height: 124px;
+  object-fit: cover;
+  display: block;
+  cursor: zoom-in;
+}
+
+.lib-media-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+}
+
+.lib-media-caption {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.lib-media-delete {
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: color 0.18s var(--ease), background 0.18s var(--ease);
+}
+
+.lib-media-delete:hover {
+  color: var(--color-error);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* ── Empty state ───────────────────────────────────────────────────────────── */
+.lib-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.lib-empty-orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  border: 1px solid var(--color-border-hover);
+  background: var(--color-surface);
+  color: var(--color-accent-hover);
+}
+
+.lib-empty-orb::before {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow-primary), var(--glow-secondary) 50%, transparent 72%);
+  filter: blur(6px);
+  opacity: 0.6;
+}
+
+.lib-empty-text {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  max-width: 280px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* ── Lightbox overlay ──────────────────────────────────────────────────────── */
+.lib-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: 24px;
+}
+
+.lib-lightbox-img {
+  max-width: 92vw;
+  max-height: 88vh;
+  border-radius: 10px;
+  box-shadow: 0 0 60px rgba(0, 0, 0, 0.5);
+}
+
+.lib-lightbox-close {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  background: rgba(15, 15, 26, 0.7);
+  border: 1px solid var(--color-border-hover);
+  border-radius: 10px;
+  color: var(--color-text);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  transition: background 0.18s var(--ease), border-color 0.18s var(--ease);
+}
+
+.lib-lightbox-close:hover {
+  background: rgba(30, 30, 50, 0.85);
+  border-color: var(--color-border-hover);
+}
+
+/* ── Aside action row inside Panel ─────────────────────────────────────────── */
+.lib-panel-aside {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

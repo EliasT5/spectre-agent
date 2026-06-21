@@ -1,0 +1,5 @@
+# Files mounted into Linux containers must keep LF endings regardless of the
+# host's core.autocrlf. A CRLF shebang/script breaks `sh`, and the local DB's
+# init scripts + Kong gateway config are read inside Linux images.
+local-db/** text eol=lf
+*.sh text eol=lf

@@ -1,0 +1,31 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# env files (secrets: CORE_TOKEN, PIN_HASH, SESSION_SECRET)
+.env*
+!.env.example
+!.env.docker.example
+
+# misc
+.DS_Store
+
+# secrets / keys — never commit (.env* above already covers .env.docker)
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.json
+*credentials*.json
+
+# local self-hosted Supabase secrets
+local-db/.env
+
+# user-extensible harness data (skills/tools/mcp) — host-mounted, not shipped
+spectre-data/
+

@@ -1,0 +1,556 @@
+/* ============================================================================
+   MEMORY tab — co-located styles (Jerome design language, semantic CSS only)
+   ========================================================================== */
+
+/* Page shell — full-height dark column, phone-width centered */
+.mem-page {
+  position: relative;
+  z-index: 1;
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  background: var(--color-bg);
+}
+
+.mem-col {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 540px;
+  min-height: 100dvh;
+  padding: 0 0 96px;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.mem-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 72px 16px 16px;
+  flex-shrink: 0;
+}
+
+.mem-header-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mem-title {
+  font-family: var(--font-display);
+  font-size: clamp(28px, 6vw, 30px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.015em;
+  background: linear-gradient(135deg, var(--grad-start), var(--grad-mid), var(--grad-end));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 0 18px rgba(99, 102, 241, 0.32));
+  margin: 0;
+}
+
+.mem-count {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* Round gradient "+" FAB */
+.mem-fab {
+  flex-shrink: 0;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, var(--grad-start), var(--grad-mid));
+  box-shadow: var(--glow-sm);
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.mem-fab:hover { box-shadow: var(--glow); transform: translateY(-1px); }
+.mem-fab:active { transform: scale(0.95); }
+.mem-fab::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--grad-start), var(--grad-mid));
+  opacity: 0.4;
+  filter: blur(14px);
+}
+
+/* Hairline separator under header */
+.mem-rule {
+  height: 1px;
+  margin: 0 16px;
+  background: linear-gradient(90deg, transparent, var(--color-border-hover) 50%, transparent);
+  flex-shrink: 0;
+}
+
+/* ── Sub-nav pill strip ──────────────────────────────────────────────────── */
+.mem-subnav {
+  display: flex;
+  gap: 6px;
+  padding: 14px 16px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.mem-subnav::-webkit-scrollbar { display: none; }
+
+.mem-nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 7px 12px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.18s var(--ease), border-color 0.18s var(--ease), background 0.18s var(--ease);
+  white-space: nowrap;
+}
+.mem-nav-pill:hover {
+  color: var(--color-text-secondary);
+  border-color: var(--color-border-hover);
+}
+.mem-nav-pill.active {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--color-accent-hover);
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.25);
+}
+
+/* ── Body scroll container ───────────────────────────────────────────────── */
+.mem-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 14px 16px 0;
+}
+
+/* ── Search bar ──────────────────────────────────────────────────────────── */
+.mem-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(10, 10, 18, 0.5);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 11px 14px;
+  margin-bottom: 12px;
+  transition: border-color 0.2s var(--ease);
+}
+.mem-search:focus-within { border-color: rgba(99, 102, 241, 0.5); }
+
+.mem-search-icon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.mem-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+.mem-search-input::placeholder { color: var(--color-text-muted); }
+
+.mem-search-clear {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  transition: color 0.18s var(--ease), background 0.18s var(--ease);
+}
+.mem-search-clear:hover { color: var(--color-text); background: var(--color-surface-hover); }
+
+/* ── Filter pills ────────────────────────────────────────────────────────── */
+.mem-filters {
+  display: flex;
+  gap: 7px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin-bottom: 16px;
+  padding-bottom: 2px;
+}
+.mem-filters::-webkit-scrollbar { display: none; }
+
+.mem-filter-pill {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 0.18s var(--ease);
+  white-space: nowrap;
+}
+.mem-filter-pill:hover {
+  color: var(--color-text-secondary);
+  border-color: var(--color-border-hover);
+}
+.mem-filter-pill.active {
+  color: var(--color-accent-hover);
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+/* ── Memory cards ────────────────────────────────────────────────────────── */
+.mem-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mem-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background: rgba(15, 15, 26, 0.5);
+  padding: 16px;
+  transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
+}
+.mem-card:hover {
+  border-color: var(--color-border-hover);
+  box-shadow: var(--ring-hi), var(--glow-soft);
+}
+
+/* Card top row: eyebrow + icons */
+.mem-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mem-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.mem-card-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* Dot separator between category + date */
+.mem-card-eyebrow-sep {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  opacity: 0.4;
+}
+
+.mem-card-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.mem-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.18s var(--ease), border-color 0.18s var(--ease), background 0.18s var(--ease);
+}
+.mem-icon-btn:hover {
+  color: var(--color-text-secondary);
+  border-color: var(--color-border-hover);
+  background: var(--color-surface-hover);
+}
+.mem-icon-btn.danger:hover {
+  color: var(--color-error);
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* Card body text */
+.mem-card-body {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+/* Weight row */
+.mem-weight-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.mem-weight-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mem-weight-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.mem-weight-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--grad-start), var(--grad-mid), var(--grad-end));
+  transition: width 0.5s var(--ease);
+}
+
+/* ── Skeleton placeholders ───────────────────────────────────────────────── */
+.mem-skeleton-card {
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background: rgba(15, 15, 26, 0.4);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Error banner ────────────────────────────────────────────────────────── */
+.mem-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--color-error);
+  margin-bottom: 14px;
+}
+.mem-error-text { flex: 1; }
+.mem-error-retry {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-size: 13px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.mem-error-retry:hover { color: #fff; }
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+.mem-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 48px 24px;
+}
+.mem-empty-orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  border: 1px solid var(--color-border-hover);
+  background: var(--color-surface);
+  color: var(--color-accent-hover);
+}
+.mem-empty-orb::before {
+  content: "";
+  position: absolute;
+  inset: -16px;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow-primary), var(--glow-secondary) 50%, transparent 72%);
+  filter: blur(6px);
+  opacity: 0.7;
+}
+.mem-empty-text {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* ── Add-memory form ─────────────────────────────────────────────────────── */
+.mem-add-form {
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background: rgba(10, 10, 18, 0.56);
+  backdrop-filter: blur(28px) saturate(180%) brightness(1.04);
+  -webkit-backdrop-filter: blur(28px) saturate(180%) brightness(1.04);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+  animation: mem-fade-up 0.28s var(--ease-out) both;
+}
+@keyframes mem-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.mem-add-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mem-add-sublabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.mem-add-textarea {
+  background: rgba(5, 5, 7, 0.6);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  resize: none;
+  outline: none;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.mem-add-textarea:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.14);
+}
+.mem-add-textarea::placeholder { color: var(--color-text-muted); }
+
+.mem-add-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.mem-add-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.mem-add-cancel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: color 0.18s var(--ease), background 0.18s var(--ease);
+}
+.mem-add-cancel:hover { color: var(--color-text-secondary); background: var(--color-surface-hover); }
+
+.mem-add-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-accent-hover);
+  background: rgba(99, 102, 241, 0.14);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 0.18s var(--ease), box-shadow 0.18s var(--ease);
+}
+.mem-add-submit:hover { background: rgba(99, 102, 241, 0.24); box-shadow: var(--glow-sm); }
+.mem-add-submit:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+
+/* Edit mode textarea inside a card */
+.mem-card-edit-area {
+  background: rgba(5, 5, 7, 0.6);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  resize: none;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.2s var(--ease);
+}
+.mem-card-edit-area:focus { border-color: rgba(99, 102, 241, 0.5); }
+
+/* Similarity badge */
+.mem-sim-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--color-success);
+  background: rgba(34, 197, 94, 0.10);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 999px;
+  padding: 2px 8px;
+}

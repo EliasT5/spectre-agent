@@ -1,0 +1,88 @@
+name: CI
+
+# Type-check, installer syntax gate, a production Next build, and a secret/identity
+# scan for the public shell. (No lint job yet — add eslint + a flat config first.)
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: typecheck + installer check + next build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      # No Supabase placeholders needed: the shell holds no storage credentials
+      # (chat rides the core's SSE thread stream through the /api proxy).
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Installer syntax check
+        run: |
+          for f in installer/*.mjs; do
+            echo "node --check $f"
+            node --check "$f"
+          done
+
+      - name: Build (Next standalone)
+        run: npm run build
+
+  secret-scan:
+    name: secret + identity scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: No gmail / personal identity in git history
+        run: |
+          if git log --all --format='%ae %ce %an %cn' | grep -qiE 'gmail\.com'; then
+            echo "::error::a gmail/personal identity appears in git history"; exit 1
+          fi
+          echo "identities clean"
+      - name: No real secrets in tracked files
+        run: |
+          if git grep -nIE '(sk-[A-Za-z0-9]{24,}|AIza[A-Za-z0-9_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{20,})' -- . ':!*lock*'; then
+            echo "::error::possible secret in a tracked file"; exit 1
+          fi
+          echo "no secrets found"
+
+  core:
+    name: core typecheck + broker test + compile smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+      - name: Install core deps
+        run: cd core && npm ci
+      - name: Install broker deps
+        run: cd core/spectre-mcp-broker && npm ci
+      - name: Core typecheck
+        run: cd core && npx tsc --noEmit
+      - name: Broker tests
+        run: cd core/spectre-mcp-broker && bun test
+      - name: Bun compile smoke (broker)
+        run: cd core && bun build --compile spectre-mcp-broker/index.mjs --outfile /tmp/spectre-broker-smoke

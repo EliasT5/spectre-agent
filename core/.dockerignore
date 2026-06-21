@@ -1,0 +1,29 @@
+# deps are reinstalled in-image (reproducible); never ship host node_modules
+node_modules
+**/node_modules
+.next
+out
+.git
+
+# bun binaries are recompiled in-image by scripts/build.mjs — never ship host builds
+# (this also keeps Windows .exe host-test artifacts out of the Linux image)
+dist
+*.exe
+
+# secrets — env is injected at runtime via compose, never baked in
+.env
+.env.*
+!.env.example
+
+# dev / loop / diagnostic cruft
+.loop-*
+.build
+_diag_*
+*.log
+*.tsbuildinfo
+gemini-ui-suggestion
+VIDEOS
+*.png
+
+# NOTE: soul/*.md, skills/*.md and supabase/*.sql are intentionally kept —
+# Jerome needs his persona + skills, and the installer applies the schema.

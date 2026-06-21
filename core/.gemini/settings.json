@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "spectre": {
+      "command": "node",
+      "args": ["./spectre-mcp-broker/index.mjs"],
+      "env": {
+        "SPECTRE_APP_URL": "http://127.0.0.1:3000"
+      },
+      "trust": true
+    }
+  }
+}

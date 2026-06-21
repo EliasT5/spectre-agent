@@ -1,0 +1,39 @@
+# Spectre edge — a same-origin front door so the Workspaces tab can iframe the
+# code-server (VS Code) editor.
+#
+# WHY this exists: the embedded editor must be served SAME-ORIGIN as the shell —
+#   1. code-server speaks WebSockets, which a Next.js route handler can't proxy;
+#   2. the shell's PIN/session cookie is `Secure` + SameSite, so a cross-origin
+#      or plain-HTTP editor would drop it and the frame would bounce to /pin;
+#   3. an HTTPS shell + an HTTP editor port = blocked mixed content.
+# Caddy fronts BOTH and routes /code/* → code-server (WS upgrade handled
+# automatically), everything else → the shell. The shell still proxies /api/* to
+# the loopback core, so nothing else changes.
+#
+# Opt-in: only runs under `--profile workspace` (alongside code-server). Access
+# Spectre via THIS edge (default http://127.0.0.1:8090) to use the editor.
+#
+# HTTPS / tailnet: set SPECTRE_SITE_ADDRESS to your domain (e.g.
+# spectre.example.com) and publish 80/443 — Caddy then does automatic TLS, which
+# also satisfies the Secure-cookie requirement for remote access.
+#
+# NOTE: validate on a live Linux Docker host. code-server behind a stripped
+# sub-path is the documented pattern; if assets 404 under /code, serve it on a
+# dedicated subdomain instead (code-server is happiest at an origin root).
+
+{
+	admin off
+}
+
+{$SPECTRE_SITE_ADDRESS::8090} {
+	# The embedded VS Code editor (code-server) — same-origin, WebSocket-aware.
+	handle_path /code/* {
+		reverse_proxy code-server:8080
+	}
+	redir /code /code/
+
+	# Everything else → the Spectre shell (which proxies /api/* to the core).
+	handle {
+		reverse_proxy shell:3100
+	}
+}

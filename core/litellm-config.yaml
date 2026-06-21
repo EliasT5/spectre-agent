@@ -1,0 +1,55 @@
+# ── LiteLLM model gateway — Spectre's provider-agnostic brain backend ────────
+#
+# Spectre's brain (src/lib/ai/providers/litellm.ts) speaks the OpenAI API to THIS
+# proxy only. LiteLLM then fans out to 100+ providers behind one OpenAI-compatible
+# surface, so a customer brings their OWN API keys / self-hosted models and never
+# drives a personal Claude/ChatGPT/Gemini *subscription* (that would violate those
+# providers' consumer ToS — the very thing Spectre forbids by default).
+#
+# ── HOW TO ADD A PROVIDER (two ways) ──
+#   1. STATIC (this file): add a model_list entry below, put its key in
+#      .env.docker, then `docker compose restart litellm`. Simple, version-able.
+#   2. RUNTIME (no restart): Spectre Settings → Providers calls LiteLLM's admin
+#      API (POST /model/new). To persist across restarts, set
+#      general_settings.store_model_in_db: true + a Postgres DATABASE_URL below.
+#
+# Each model_name is the friendly id Spectre requests (SPECTRE_LITELLM_MODEL).
+# Docs: https://docs.litellm.ai/docs/proxy/configs
+
+model_list:
+  # ── Self-hosted default (NO key, runs on the host's Ollama) — ships ToS-clean.
+  #    ollama_chat/ supports tool/function calling, which the agentic loop needs.
+  - model_name: spectre-default
+    litellm_params:
+      model: ollama_chat/qwen2.5:7b-instruct
+      api_base: http://host.docker.internal:11434
+
+  # ── Bring your own keys (uncomment + set the env var in .env.docker). These
+  #    are the LEGAL, metered API paths — not subscriptions.
+  # - model_name: spectre-pro
+  #   litellm_params:
+  #     model: anthropic/claude-sonnet-4-6
+  #     api_key: os.environ/ANTHROPIC_API_KEY
+  # - model_name: spectre-openai
+  #   litellm_params:
+  #     model: openai/gpt-4o
+  #     api_key: os.environ/OPENAI_API_KEY
+  # - model_name: spectre-gemini
+  #   litellm_params:
+  #     model: gemini/gemini-2.5-pro
+  #     api_key: os.environ/GEMINI_API_KEY
+  # - model_name: spectre-azure
+  #   litellm_params:
+  #     model: azure/<your-deployment>
+  #     api_base: os.environ/AZURE_API_BASE
+  #     api_key: os.environ/AZURE_API_KEY
+
+litellm_settings:
+  drop_params: true   # tolerate models that don't accept every OpenAI param
+  num_retries: 2
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Enable runtime "add provider via Settings" to PERSIST (POST /model/new):
+  # store_model_in_db: true
+  # database_url: os.environ/DATABASE_URL
