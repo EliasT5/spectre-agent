@@ -2,11 +2,11 @@
 
 <img src="docs/media/banner.png" alt="Spectre Agent — it's your assistant. Haunt your own machine." width="760">
 
-<img src="docs/media/home.png" alt="Spectre Agent — a living 3D home with your modules in orbit" width="760">
+<img src="docs/media/home.png" alt="Spectre Agent home screen" width="760">
 
 **A self-hosted AI agent you build into exactly what you need.**
 
-**Spectre Agent** is a self-hosted AI agent with a 3D interface, where every capability is a *module you can write yourself*. I built it to fight my own ADHD — it remembers what matters, runs recurring tasks on its own, and is built to help me start things rather than stall on them. I made it extensible so it can become whatever *you* need. Your hardware, your models, your keys.
+**Spectre Agent** is a self-hosted AI agent with a 3D interface. Every capability is a *module you can write yourself*. I built it to fight my own ADHD: it remembers what matters, runs recurring tasks on its own, and helps me start things instead of stalling on them. I made it extensible so it can become whatever *you* need. Your hardware, your models, your keys.
 
 [![CI](https://github.com/EliasT5/spectre-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/EliasT5/spectre-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-5965e0.svg)](LICENSE)
@@ -20,34 +20,32 @@
 
 ---
 
-> ## ⚠️ Recently opened — read the code before you run it
+> ## ⚠️ Recently opened. Read the code before you run it
 >
-> The core went public sooner than planned, and the latest commit hasn't been through a full clean-room test yet. This is early-stage software that runs with shell access — read the files and verify it yourself before you run anything on your machine. Don't take my word that it's safe.
+> The core went public sooner than planned, and the latest commit hasn't been through a full clean-room test yet. This is early-stage software that runs with shell access. Read the files and verify it yourself before you run anything on your machine. Don't take my word that it's safe.
 
 ---
 
 **What makes it different**
 
-- 🧩 **You build it out** — every capability is a module. Add your own two ways: a JSON description (no code) or your own code. It grows the way *you* want, instead of waiting on a feature-request queue.
-- 🧠 **Built for executive dysfunction** — it came out of my own ADHD: it remembers across conversations, runs recurring tasks on its own, and is meant to help you *start* and stay focused, not add one more thing to manage.
-- 🏠 **A 3D interface, not a chat box** — your modules laid out as clickable orbs; or skip the UI and run it headless over Telegram, WhatsApp, Discord or HTTP.
-- 🔑 **Entirely yours** — self-hosted on your hardware, your models, your keys; bring an API key or run a local model with no cloud account at all.
+- 🧩 **You build it out.** Every capability is a module. Add your own two ways: a JSON description (no code) or your own code. It grows the way *you* want, instead of waiting on a feature-request queue.
+- 🧠 **Built for executive dysfunction.** It came out of my own ADHD: it remembers across conversations, runs recurring tasks on its own, and helps you *start* and stay focused instead of adding one more thing to manage.
+- 🏠 **A 3D interface.** Your modules sit as clickable orbs you can open and rearrange. Or skip the UI and run it headless over Telegram, WhatsApp, Discord, or HTTP.
+- 🔑 **Entirely yours.** Self-hosted on your hardware, your models, your keys. Bring an API key, or run a local model with no cloud account at all.
 
 ---
 
 ## The first ten minutes
 
-One install command, then you open `http://127.0.0.1:3100` and hit a dark lock screen — *Secure Access. Enter your PIN.* Nothing reaches the agent until you're past it.
+One install command. You open `http://127.0.0.1:3100` and hit a dark lock screen: *Secure Access. Enter your PIN.* Nothing reaches the agent until you're past it.
 
-Then the home screen loads: a 3D scene with an animated central blob, ringed by one orb per module — Chat, Memory, Monitor, Settings, and whatever else your install includes. A clock sits overhead with a greeting that changes by time of day. Drag to rotate the view, scroll to zoom, click an orb to open that tab. There's no setup wizard or tour.
+Then the home screen loads: a 3D scene with an animated central blob, ringed by one orb per module: Chat, Memory, Monitor, Settings, and whatever else your install includes. A clock sits overhead, with a greeting that changes by time of day. Drag to rotate the view, scroll to zoom, click an orb to open that tab. There's no setup wizard or tour.
 
-Start in Chat. Type a message, leave the model on Auto or pick one, and the reply streams in. When the agent calls a tool — shell, files, a screenshot — the call shows inline as a chip you can expand, and anything sensitive pauses for an Approve / Deny prompt before it runs. Turns run on the server, so you can close the tab mid-answer and it finishes without you. Follow-up messages queue behind the one in progress.
-
-That covers the core idea: an interface you can see, tool calls you can watch, and nothing sensitive running without your approval.
+Start in Chat. Type a message, leave the model on Auto or pick one, and the reply streams in. When the agent calls a tool (your shell, your files, a screenshot), the call shows inline as a chip you can expand. Anything that touches something sensitive waits for your Approve or Deny first. Turns run on the server, so you can close the tab mid-answer and it finishes without you. Follow-up messages queue behind the one in progress.
 
 ---
 
-> **🚧 Early development.** Spectre Agent is young and moving fast — expect rough edges, breaking changes, and features that aren't finished yet. Kick the tires, file issues, and help shape it; just don't trust it with anything critical for now.
+> **🚧 Early development.** Spectre Agent is young and moving fast. Expect rough edges, breaking changes, and unfinished features. Kick the tires and file issues, but don't trust it with anything critical yet.
 
 _On the name: **Spectre Agent** runs on your own machine and answers only to you. It has no relation to the [Spectre CPU vulnerability](https://en.wikipedia.org/wiki/Spectre_%28security_vulnerability%29); the name is about the ghost, not the exploit._
 
@@ -85,23 +83,23 @@ node installer/install.mjs
 
 With a UI profile, open **http://127.0.0.1:3100** and enter your PIN. Headless, just message your bot.
 
-> **Note:** the core is in this repo at [`core/`](core/) and builds from source — the installer compiles it. Nothing to pull, nothing sealed. To update: `git pull && docker compose up -d --build`.
+> **Note:** the core is in this repo at [`core/`](core/) and builds from source; the installer compiles it. Nothing to pull, nothing sealed. To update: `git pull && docker compose up -d --build`.
 
 ---
 
 ## Modules
 
-Everything in the home is a module. Chat is a module. Memory is a module. So are the monitor, the library, and settings. They all run on the same platform you build on — same rules, same guardrails.
+Everything in the home is a module. Chat is a module. Memory is a module. So are the monitor, the library, and settings. They all run on the same platform you build on, under the same rules and quotas.
 
 <div align="center">
 <img src="docs/media/customize.png" alt="Blobs and slots panel, your modules in orbit" width="720">
 
-*Your modules. Drag, recolor, rename — or add one you wrote yourself.*
+*Your modules. Rearrange and recolor them, or add one you wrote yourself.*
 </div>
 
 So when Spectre Agent is missing something you want, you don't file a feature request. You build a module:
 
-- **Data mode.** Write a JSON description — widgets, data, actions — and Spectre Agent renders it in the app's style. No build step, nothing to compile, and no way to inject code, because the schema is data.
+- **Data mode.** Write a JSON description (widgets, data, actions) and Spectre Agent renders it in the app's style. No build step, nothing to compile, and no way to inject code, because the schema is data.
 - **Code mode.** Ship real code. Spectre Agent treats it as untrusted: fingerprint-checked (SHA-384) before it runs, locked in a sandboxed iframe, with no network of its own and a short read-only list of SDK calls with rate caps.
 
 Whoever wrote it, every module gets the same deal:
@@ -112,9 +110,9 @@ Whoever wrote it, every module gets the same deal:
 - **Signed manifests.** An ed25519 keyring (`SPECTRE_MODULE_TRUSTED_KEYS`) verifies who made it. Tampered or unsigned? Refused.
 - **Drop-in install.** Put it in the data dir. The registry checks the manifest before it loads.
 
-### Here's a real one
+### A real module
 
-This is **Tally**, a tiny counter built with no code at all — just a manifest. An id, a private data store, and a UI written as data:
+This is **Tally**, a tiny counter built with no code, just a manifest: an id, a private data store, and a UI written as data.
 
 ```json
 {
@@ -152,7 +150,7 @@ This is **Tally**, a tiny counter built with no code at all — just a manifest.
 }
 ```
 
-No build step, no React, no server of its own. `permissions.data: "rw"` gives it a private store walled off from every other module; the `backend` routes append and read its own rows; the `ui.schema` *is* the screen — a form, a button, and a list that re-reads itself after each tick. Drop that in your data dir and a Tally orb appears in the home, sandboxed and running. A module can be exactly this small — or grow into [Pulse](core/supabase/seed-pulse-demo.sql), the live-telemetry reference that does the same trick with four data sources and a polling feed.
+No build step, no React, no server of its own. `permissions.data: "rw"` gives it a private store walled off from every other module. The `backend` routes append and read its own rows, and the `ui.schema` is the whole screen: a form, a button, and a list that re-reads after each tick. Drop it in your data dir and a Tally orb appears in the home, sandboxed and running. Yours can be this small, or grow into [Pulse](core/supabase/seed-pulse-demo.sql), the live-telemetry reference that does the same with four data sources and a polling feed.
 
 Full SDK reference: [`docs/MODULES.md`](docs/MODULES.md).
 
@@ -162,13 +160,13 @@ Full SDK reference: [`docs/MODULES.md`](docs/MODULES.md).
 
 The web UI is optional. Turn it off and Spectre Agent keeps working:
 
-- Text it. Telegram, WhatsApp and Discord ride the same conversation engine; replies come back to the channel, images included.
-- Walk away. Every turn runs on the server — shut your laptop mid-answer and it finishes without you.
-- Let it run errands. Recurring reports, check-ins, the nightly memory cleanup, all on the built-in scheduler.
-- Script it. The whole core is one HTTP API behind one token — cron it, pipe it, wire it into anything.
-- Stay reachable. It still pings your phone when something matters.
+- Text it. Telegram, WhatsApp, and Discord ride the same conversation engine; replies come back to the channel, images included.
+- Walk away. Every turn runs on the server, so you can shut your laptop mid-answer and it finishes without you.
+- Let it run errands. Recurring reports, check-ins, and the nightly memory cleanup, all on the built-in scheduler.
+- Script it. The whole core is one HTTP API behind one token, so you can cron it, pipe it, or wire it into anything.
+- Stay reachable. It pings your phone when something matters.
 
-And if you don't like this shell? Build your own. It's MIT, it holds no data, and every feature you see is an API call. Fork it, reskin it, or replace it from scratch.
+Don't like this shell? Build your own. It's MIT, it holds no data, and every feature you see is an API call. Fork it, reskin it, or start from scratch.
 
 ---
 
@@ -176,15 +174,15 @@ And if you don't like this shell? Build your own. It's MIT, it holds no data, an
 
 **Any model.** One agent loop speaks the OpenAI API to a [LiteLLM](https://docs.litellm.ai) gateway: Anthropic, OpenAI, Gemini, Bedrock, Azure, Ollama, vLLM, 100+ backends. Local models need no keys. Pick a model per message, or let the router choose.
 
-**Tools, gated.** Dozens of them — shell, files, calendar, schedules, screenshots, modules. Every call passes an approval gate with saved permissions and quotas. Disk-wiping commands are blocked before the prompt even appears. A daily spend cap cuts off paid models at your limit; local models run free.
+**Tools, gated.** Dozens of them: shell, files, calendar, schedules, screenshots, modules. Every call passes an approval gate with saved permissions and quotas. It blocks disk-wiping commands before the prompt even appears. A daily spend cap cuts off paid models at your limit; local models run free.
 
-**Persistent memory.** Tell it once and it finds the fact later by meaning, not keywords, across conversations. A nightly pass merges duplicate memories and lets stale ones fade. Feed it PDFs and it answers from them.
+**Persistent memory.** Tell it once and it finds the fact later by meaning, not keywords, across conversations. Overnight, it merges duplicate memories and lets stale ones fade. Feed it PDFs and it answers from them.
 
-**Skills.** Written playbooks in plain Markdown — your own procedures the agent loads on demand and follows. Drop new ones in the data dir and it picks them up.
+**Skills.** Written playbooks in plain Markdown: your own procedures the agent loads on demand and follows. Drop new ones in the data dir and it picks them up.
 
 **Autonomy, off by default.** A heartbeat can wake it for small background runs, with a capped budget, a tool allowlist, and a hard time limit. Until you turn it on, it does nothing on its own.
 
-**Self-reporting.** Problems are logged, critical ones are pushed to your phone, and the health probe reports red when the stack is broken.
+**Self-reporting.** It logs problems, pushes the critical ones to your phone, and turns the health check red when the stack breaks.
 
 ---
 
@@ -208,7 +206,7 @@ By default, Spectre Agent talks to a gateway you control, using your own API key
 
 > ### A note on subscriptions
 >
-> Spectre Agent can also run on a personal AI subscription instead of metered API keys — driving your own Claude / Codex / Gemini session through the vendor's own CLI, the way their first-party agent tools do. All three ship off by default; turn one on in the config or in Settings → Providers (with `SPECTRE_ALLOW_CLI_UI=1`). Check your provider's terms first — some don't allow it, which is why it's opt-in. Either way, the default brain stays your own API key through the gateway, or a local model with no keys at all.
+> Spectre Agent can also run on a personal AI subscription instead of metered API keys. It drives your own Claude, Codex, or Gemini session through the vendor's own CLI, the way their first-party agent tools do. All three ship off by default; turn one on in the config or in Settings → Providers (with `SPECTRE_ALLOW_CLI_UI=1`). Check your provider's terms first, since some don't allow it. That's why it's opt-in. Either way, the default stays your own API key through the gateway, or a local model with no keys.
 
 ---
 
@@ -218,7 +216,7 @@ Two halves, both open source, in this one repo.
 
 The repo root (**shell**) is the optional UI and a thin proxy. MIT, open, yours to modify.
 
-[`core/`](core/) is everything else: model routing, memory, tools, modules, scheduling, autonomy. It's a Bun/Hono backend you build from source. It binds to a loopback port and answers nothing without the token — even past the PIN, the core won't respond without it, and you can read exactly how in the source.
+[`core/`](core/) is everything else: model routing, memory, tools, modules, scheduling, autonomy. It's a Bun/Hono backend you build from source. It binds to a loopback port and answers nothing without the token. Even past the PIN, the core stays silent without it, and you can read how in the source.
 
 <img src="docs/media/architecture.svg" alt="browser to shell to loopback core to your model gateway" width="100%">
 
@@ -254,7 +252,7 @@ It finds your existing install, lifts the provider keys, channel tokens and pref
 
 ## Roadmap
 
-Built in stages — **early development** (now) → harden & expand → the [Workshop](https://elias-teubner.dev/spectre). Shell and core are both open source. Full detail in **[ROADMAP.md](ROADMAP.md)**.
+Built in stages. Now: **early development**, then harden & expand, then the [Workshop](https://elias-teubner.dev/spectre). Shell and core are both open source. Full detail in **[ROADMAP.md](ROADMAP.md)**.
 
 ---
 
@@ -272,6 +270,6 @@ Built in stages — **early development** (now) → harden & expand → the [Wor
 
 ## License
 
-MIT — see [LICENSE](LICENSE). It covers the whole project: the shell at the repo root and the core in [`core/`](core/). Both are fully open source. Third-party dependency notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+MIT. See [LICENSE](LICENSE). It covers the whole project: the shell at the repo root and the core in [`core/`](core/). Both are fully open source. Third-party dependency notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Issues and PRs are happily accepted — if you spot a part of the code that could be cleaner, faster, or just better, send a pull request. Suggestions and improvements of any size are welcome.
+Issues and PRs welcome. If you spot code that could be cleaner or faster, send a pull request. Suggestions of any size help.
