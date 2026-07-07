@@ -546,7 +546,18 @@ export default function ChatTab() {
             </button>
             {modelOpen && (
               <div className="model-dd-menu" role="listbox">
-                {models.map((m) => {
+                {/* Only show usable models: Auto + available + whatever's currently
+                    selected. The full hardcoded catalog (Claude/GPT/Gemini/… you
+                    haven't wired up) lives in Settings → Providers for enabling; the
+                    chat picker stays "what you can actually use + what you added". */}
+                {models
+                  .filter((m) => m.available !== false || m.id === currentModelId)
+                  // Hide embedding models — they aren't chat models (used internally for memory recall).
+                  .filter((m) => !/embed/i.test(m.id) && !/embed/i.test(m.label))
+                  // De-dupe the gateway default: the detected "spectre-default" is the SAME backing
+                  // model as the catalog "LiteLLM gateway (default model)" entry.
+                  .filter((m) => m.id !== "spectre-default")
+                  .map((m) => {
                   const sel = m.id === currentModelId;
                   const unavailable = m.available === false;
                   return (

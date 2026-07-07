@@ -392,11 +392,19 @@
   color: var(--color-text-muted);
 }
 
-/* ── Add-provider form ───────────────────────────────────────────────────── */
+/* ── Add-model form ──────────────────────────────────────────────────────── */
 .settings-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* ── CLI sub-rows (token / binary path under a CLI row) ─────────────────── */
+.settings-cli-subrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 0 8px 16px;
 }
 
 .settings-form-msg {
