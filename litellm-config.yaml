@@ -24,6 +24,28 @@ model_list:
       model: ollama_chat/qwen2.5:7b-instruct
       api_base: http://host.docker.internal:11434
 
+  # ── Tool-capable local Ollama models, exposed through the gateway so they can run
+  #    the AGENTIC (tool-using) loop. Spectre surfaces these as a "· tools" variant
+  #    (id "gateway:<model>") beside the fast, tool-less direct-Ollama entry — the
+  #    user picks the route. Only list models Ollama supports tool-calling for
+  #    (llama3.x / qwen2.5 family); gemma3 & deepseek-r1 have no tool support.
+  - model_name: qwen2.5:7b-instruct
+    litellm_params:
+      model: ollama_chat/qwen2.5:7b-instruct
+      api_base: http://host.docker.internal:11434
+  - model_name: llama3.1:8b
+    litellm_params:
+      model: ollama_chat/llama3.1:8b
+      api_base: http://host.docker.internal:11434
+  - model_name: qwen2.5-coder:7b
+    litellm_params:
+      model: ollama_chat/qwen2.5-coder:7b
+      api_base: http://host.docker.internal:11434
+  - model_name: llama3.2:3b
+    litellm_params:
+      model: ollama_chat/llama3.2:3b
+      api_base: http://host.docker.internal:11434
+
   # ── Bring your own keys (uncomment + set the env var in .env.docker). These
   #    are the LEGAL, metered API paths — not subscriptions.
   # - model_name: spectre-pro

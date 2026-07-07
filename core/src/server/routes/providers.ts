@@ -1,5 +1,17 @@
 import { Hono } from "hono";
-import { CLI_IDS, getCliGate, setCliEnabled, probeCliBinary, type CliId } from "@/lib/ai/cli-gate";
+import { CLI_IDS, getCliGate, setCliEnabled, setCliToken, setCliBin, probeCliBinary, type CliId } from "@/lib/ai/cli-gate";
+import { validateBackend } from "@/lib/ai/backends/schema";
+import { buildApiLiteLLMBody } from "@/lib/ai/backends/litellm-map";
+import { registerModel, deleteModel } from "@/lib/ai/backends/litellm-admin";
+import {
+  listBackends,
+  getBackendSync,
+  upsertBackend,
+  deleteBackend as removeBackend,
+  setBackendEnabled,
+} from "@/lib/ai/backends/registry";
+import { CLI_BACKENDS_ALLOWED, assertBackendAllowed, probeBackend } from "@/lib/ai/backends/gate";
+import { startServer, stopServer, serverStatus } from "@/lib/ai/backends/supervisor";
 
 /**
  * /api/providers/models - add/remove a provider model on the LiteLLM gateway at
@@ -190,4 +202,155 @@ providers.put("/cli", async (c) => {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 403);
   }
   return c.json({ ok: true, ...(await cliStateWithBinaries()) });
+});
+
+// Set (or clear) a CLI's runtime auth token entirely from the UI — no file edit,
+// no restart. The value is stored server-side and injected into the spawned CLI's
+// env at call time; it is never returned by GET /cli (only `hasToken`).
+providers.put("/cli/token", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { id?: string; token?: string };
+  if (!body.id || !(CLI_IDS as readonly string[]).includes(body.id)) {
+    return c.json({ error: `id must be one of: ${CLI_IDS.join(", ")}` }, 400);
+  }
+  if (typeof body.token !== "string") {
+    return c.json({ error: "token (string; empty to clear) is required." }, 400);
+  }
+  try {
+    await setCliToken(body.id as CliId, body.token);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 403);
+  }
+  return c.json({ ok: true, ...(await cliStateWithBinaries()) });
+});
+
+// Set (or clear) a CLI's binary command/PATH entry entirely from the UI — the user
+// types `claude` or a full path, Spectre spawns that. Makes the deep-integration
+// CLIs modular: default none, located by what the user enters.
+providers.put("/cli/bin", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { id?: string; bin?: string };
+  if (!body.id || !(CLI_IDS as readonly string[]).includes(body.id)) {
+    return c.json({ error: `id must be one of: ${CLI_IDS.join(", ")}` }, 400);
+  }
+  if (typeof body.bin !== "string") {
+    return c.json({ error: "bin (string command/path; empty to clear) is required." }, 400);
+  }
+  try {
+    await setCliBin(body.id as CliId, body.bin);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 403);
+  }
+  return c.json({ ok: true, ...(await cliStateWithBinaries()) });
+});
+
+// ── Model backends (unified: api / cli-server / cli-command) ────────────────
+// The "teach Spectre a model" write path. api backends register on the LiteLLM
+// gateway (like /models); cli-server + cli-command spawn operator commands and are
+// gated behind SPECTRE_ALLOW_CLI_BACKENDS. Secrets (api keys) are forwarded to
+// LiteLLM and NEVER persisted in the registry.
+providers.post("/backends", async (c) => {
+  const raw = (await c.req.json().catch(() => ({}))) as Record<string, unknown> & {
+    apiKey?: string;
+    dryRun?: boolean;
+  };
+  const apiKey = typeof raw.apiKey === "string" ? raw.apiKey : undefined;
+  const dryRun = raw.dryRun === true;
+  // Strip transient fields before validating/persisting — apiKey is NEVER stored.
+  const { apiKey: _k, dryRun: _d, ...specRaw } = raw;
+  const v = validateBackend(specRaw);
+  if (!v.ok) return c.json({ error: "invalid backend", detail: v.errors }, 400);
+  const spec = v.backend;
+
+  try {
+    if (spec.kind === "api") {
+      const body = buildApiLiteLLMBody(spec, apiKey);
+      const res = await registerModel(body, apiKey);
+      if (!res.ok) {
+        return c.json(
+          {
+            error: `The gateway rejected the model (HTTP ${res.status}). A plain Ollama/config-only gateway has no runtime admin API — add it to litellm-config.yaml and restart instead.`,
+            detail: res.detail,
+          },
+          502,
+        );
+      }
+      if (dryRun) {
+        if (res.litellmModelId) await deleteModel(res.litellmModelId).catch(() => {});
+        return c.json({ ok: true, dryRun: true, detail: res.detail });
+      }
+      await upsertBackend({ ...spec, litellmModelId: res.litellmModelId });
+      return c.json({ ok: true, id: spec.id, detail: res.detail });
+    }
+
+    // cli-server / cli-command spawn operator commands → require the master flag.
+    assertBackendAllowed(spec.kind);
+
+    if (dryRun) {
+      const ok = await probeBackend(spec);
+      return c.json({ ok, dryRun: true, detail: ok ? "command is runnable" : "command not found / not runnable on PATH" });
+    }
+
+    await upsertBackend(spec);
+    if (spec.kind === "cli-server") {
+      const st = await startServer(spec);
+      return c.json({ ok: st.status !== "failed", id: spec.id, status: st.status, error: st.error });
+    }
+    // cli-command: upsert already materialized backends.json (broker registers the
+    // dispatch tool on the next turn) and the snapshot makes the brain selectable.
+    return c.json({ ok: true, id: spec.id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return c.json({ error: msg }, /disabled/i.test(msg) ? 403 : 500);
+  }
+});
+
+providers.get("/backends", async (c) => {
+  const backends = await listBackends();
+  const items = backends.map((b) => {
+    const item: Record<string, unknown> = {
+      id: b.id,
+      kind: b.kind,
+      label: b.label,
+      enabled: b.enabled,
+      roles: b.roles,
+      endpointType: b.endpointType,
+      modelName: b.modelName || b.id,
+      command: b.command,
+    };
+    if (b.kind === "cli-server") item.server = serverStatus(b.id) ?? { status: "stopped" };
+    return item;
+  });
+  return c.json({ uiAllowed: CLI_BACKENDS_ALLOWED, backends: items });
+});
+
+providers.put("/backends/:id", async (c) => {
+  const id = c.req.param("id");
+  const body = (await c.req.json().catch(() => ({}))) as { enabled?: boolean };
+  if (typeof body.enabled !== "boolean") return c.json({ error: "enabled (boolean) is required." }, 400);
+  const cur = getBackendSync(id);
+  if (!cur) return c.json({ error: "backend not found" }, 404);
+  try {
+    if (cur.kind !== "api") assertBackendAllowed(cur.kind);
+    const next = await setBackendEnabled(id, body.enabled);
+    if (next?.kind === "cli-server") {
+      if (body.enabled) await startServer(next);
+      else await stopServer(id);
+    }
+    return c.json({ ok: true, id, enabled: body.enabled });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 403);
+  }
+});
+
+providers.delete("/backends/:id", async (c) => {
+  const id = c.req.param("id");
+  const cur = getBackendSync(id);
+  if (!cur) return c.json({ error: "backend not found" }, 404);
+  try {
+    if (cur.kind === "api" && cur.litellmModelId) await deleteModel(cur.litellmModelId).catch(() => {});
+    if (cur.kind === "cli-server") await stopServer(id);
+    await removeBackend(id);
+    return c.json({ ok: true, id });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
 });

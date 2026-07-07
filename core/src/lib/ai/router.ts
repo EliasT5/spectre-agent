@@ -24,6 +24,8 @@
 
 import { MODEL_CATALOG, type Intent, type ModelDef } from "./models";
 import { isProviderAvailable } from "./providers";
+import { getBackendSync } from "./backends/registry";
+import { ollamaModelsSync } from "./providers/ollama";
 
 export type { Intent } from "./models";
 
@@ -151,12 +153,82 @@ export function route(message: string, modelHint?: string | null): RouteResult {
   }
 
   if (modelHint) {
+    // Explicit "route through the gateway (agentic/tools)" request — the "· tools"
+    // picker variant of a local model. `gateway:<model>` forces the LiteLLM path so
+    // the model runs the tool loop, even though the bare id would go to Ollama.
+    if (modelHint.startsWith("gateway:") && isProviderAvailable("litellm")) {
+      const bare = modelHint.slice("gateway:".length);
+      return {
+        model: {
+          id: modelHint,
+          provider: "litellm",
+          cliModel: bare,
+          displayName: `${bare} (tools)`,
+          strengths: ["general", "reasoning", "coding"],
+          bestFor: [],
+          costTier: 3,
+          speed: 3,
+          maxOutputTokens: 8192,
+          contextWindow: 128_000,
+        },
+        intent: "chat",
+        reason: `Gateway (tools) ${bare}`,
+      };
+    }
     const hinted = available.find((m) => m.id === modelHint);
     if (hinted) {
       return {
         model: hinted,
         intent: "chat",
         reason: `User selected ${hinted.displayName}`,
+      };
+    }
+    // A user-taught cli-command backend selected as a brain (chat-only text CLI).
+    // Checked BEFORE the litellm catch-all, which would otherwise claim any hint.
+    const backend = getBackendSync(modelHint);
+    if (
+      backend &&
+      backend.kind === "cli-command" &&
+      backend.roles?.brain &&
+      backend.enabled &&
+      isProviderAvailable("cli-text")
+    ) {
+      return {
+        model: {
+          id: modelHint,
+          provider: "cli-text",
+          cliModel: backend.id,
+          displayName: backend.label,
+          strengths: ["general"],
+          bestFor: [],
+          costTier: 2,
+          speed: 3,
+          maxOutputTokens: 4096,
+          contextWindow: backend.contextWindow ?? 32_000,
+        },
+        intent: "chat",
+        reason: `CLI backend ${backend.label}`,
+      };
+    }
+    // A live Ollama model pulled locally → the fast, tool-less ollama provider.
+    // Checked BEFORE the litellm catch-all so local models aren't sent to the
+    // gateway (which may not know them, and injects tool schemas that tool-less
+    // models like gemma3 reject with "does not support tools").
+    if (isProviderAvailable("ollama") && ollamaModelsSync().includes(modelHint)) {
+      return {
+        model: {
+          id: modelHint,
+          provider: "ollama",
+          displayName: modelHint,
+          strengths: ["general"],
+          bestFor: [],
+          costTier: 1,
+          speed: 3,
+          maxOutputTokens: 4096,
+          contextWindow: 32_000,
+        },
+        intent: "chat",
+        reason: `Ollama model ${modelHint}`,
       };
     }
     // Not in the static catalog — but if LiteLLM is configured, the hint may be a

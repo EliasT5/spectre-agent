@@ -50,6 +50,22 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && git config --global --add safe.directory '*'
 
+# Optional: bundle the Claude Code CLI (a subscription "brain") INTO the image so
+# it works in the CONTAINERIZED core (the CLIs otherwise run from the host, which a
+# container can't reach). OFF by default — host-run cores don't need it. Enable:
+#   docker compose build --build-arg INSTALL_CLAUDE_CLI=1 core
+# Auth is a portable token: run `claude setup-token` on the host and put the value
+# in .env.docker as CLAUDE_CODE_OAUTH_TOKEN (it flows into the spawned CLI's env).
+ARG INSTALL_CLAUDE_CLI=0
+RUN if [ "$INSTALL_CLAUDE_CLI" = "1" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends nodejs npm \
+      && npm install -g @anthropic-ai/claude-code \
+      && npm cache clean --force \
+      && rm -rf /var/lib/apt/lists/* \
+      && claude --version; \
+    fi
+
 # The compiled binaries.
 COPY --from=build /app/dist/ ./dist/
 # Runtime DATA the binaries read (persona + skills the soul builder reads, and the

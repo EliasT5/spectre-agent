@@ -37,6 +37,7 @@ import { registerGeminiExecute } from "./gemini-execute.mjs";
 import { registerOpenAITools } from "./openai-tools.mjs";
 import { registerDispatchToModel } from "./dispatch-tool.mjs";
 import { registerDataTools } from "./data-tools.mjs";
+import { registerCliDispatchTools } from "./cli-dispatch.mjs";
 // Import (not readFileSync) the catalog so `bun build --compile` EMBEDS it in the
 // broker binary — a compiled binary has no tools-catalog.json on disk, and reading
 // it at runtime crashed the binary on startup. Works in node 24 + bun via the
@@ -1436,6 +1437,18 @@ try {
   registerDataTools(server);
 } catch {
   /* a bad tool file must never stop the broker from starting */
+}
+
+/* ─────────────── user cli-command dispatch backends (RCE-gated) ─────── */
+// dispatch.<id> tools generated from <SPECTRE_DATA_DIR>/backends/backends.json for
+// cli-command backends with roles.dispatch. Spawns operator commands → gated behind
+// SPECTRE_ALLOW_CLI_BACKENDS, same as gemini.execute / openai.* above.
+if (process.env.SPECTRE_ALLOW_CLI_BACKENDS === "1") {
+  try {
+    registerCliDispatchTools(server);
+  } catch {
+    /* a bad backend file must never stop the broker from starting */
+  }
 }
 
 /* ─────────────────────── Jerome Mode dispatch ─────────────────────── */

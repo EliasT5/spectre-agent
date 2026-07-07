@@ -29,3 +29,9 @@ local-db/.env
 # user-extensible harness data (skills/tools/mcp) — host-mounted, not shipped
 spectre-data/
 
+# local iterative-work state — loop runs + templates (not shipped)
+loops/
+
+# private working notes / roadmap (kept local)
+notes/
+

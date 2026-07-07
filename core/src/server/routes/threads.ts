@@ -556,13 +556,17 @@ threads.post("/:threadId/run", async (c) => {
     }
   } catch (err) {
     errored = err instanceof Error ? err.message : "run failed";
+    // A single failed turn is a PER-TURN error (the user already sees it in chat),
+    // not a system-health emergency — so `warning`, not `critical`, and no phone
+    // push. Reserve `critical` + push for infra failures (DB/gateway down), which
+    // report themselves elsewhere. Keeps the Monitor's "critical" count meaningful.
     void reportEvent({
-      severity: "critical",
+      severity: "warning",
       component: `chat-run:${model.id}`,
       description: errored,
       detail: err,
       threadId,
-      push: true,
+      push: false,
     });
   }
 

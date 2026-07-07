@@ -17,6 +17,15 @@ export async function isOllamaAvailable(): Promise<boolean> {
  * Returns the model IDs currently pulled in the local Ollama instance.
  * Uses /api/tags (same endpoint as isOllamaAvailable). Returns [] on any error.
  */
+// Sync snapshot of the last-fetched Ollama model list, so route() (which is
+// synchronous) can recognize a pulled local model and send it to THIS provider
+// instead of the LiteLLM catch-all. Warmed by listOllamaModels() (called on every
+// GET /api/models and at provider detection).
+let cachedModels: string[] = [];
+export function ollamaModelsSync(): string[] {
+  return cachedModels;
+}
+
 export async function listOllamaModels(): Promise<string[]> {
   try {
     const res = await fetch(`${OLLAMA_HOST}/api/tags`, {
@@ -24,7 +33,9 @@ export async function listOllamaModels(): Promise<string[]> {
     });
     if (!res.ok) return [];
     const data = (await res.json()) as { models?: Array<{ name: string }> };
-    return (data.models ?? []).map((m) => m.name).filter(Boolean);
+    const names = (data.models ?? []).map((m) => m.name).filter(Boolean);
+    cachedModels = names;
+    return names;
   } catch {
     return [];
   }

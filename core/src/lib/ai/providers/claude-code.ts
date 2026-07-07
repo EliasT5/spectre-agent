@@ -5,9 +5,10 @@ import { join } from "path";
 import type { StreamChunk, StreamOptions } from "./types";
 import { killProcessTree } from "./process-group";
 import { renderMcpToolBlock } from "../mcp-catalog";
-import { cliAllowed } from "../cli-gate";
+import { cliAllowed, getCliToken, getCliBin } from "../cli-gate";
 
-const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
+// The claude binary is resolved at spawn time via getCliBin("claude-code") so a
+// UI-set path/command takes effect without a restart (see cli-gate.ts).
 const SESSION_MARKER_DIR = join(homedir(), ".jerome", "sessions");
 const PERMISSION_MODE = process.env.CLAUDE_PERMISSION_MODE || "acceptEdits";
 
@@ -242,10 +243,13 @@ export function spawnClaudeCode(opts: SpawnClaudeOptions = {}): ChildProcess {
     args.push("--system-prompt", effectiveSystemPrompt);
   }
 
-  const proc = spawn(CLAUDE_BIN, args, {
+  const proc = spawn(getCliBin("claude-code"), args, {
     cwd: opts.cwd || process.env.SPECTRE_REPO_PATH || process.cwd(),
     env: {
       ...process.env,
+      // Runtime auth token set from the UI (Settings → Providers) — overrides any
+      // env token, so a CLI can be authenticated with no file edit / restart.
+      ...(getCliToken("claude-code") ? { CLAUDE_CODE_OAUTH_TOKEN: getCliToken("claude-code") as string } : {}),
       CODEX_CLI_BIN:
         process.env.CODEX_CLI_BIN && process.env.CODEX_CLI_BIN !== "codex"
           ? process.env.CODEX_CLI_BIN
@@ -593,7 +597,7 @@ export async function isClaudeCodeAvailable(): Promise<boolean> {
   // unless explicitly opted in.
   if (!cliAllowed("claude-code")) return false;
   return new Promise((resolve) => {
-    const proc = spawn(CLAUDE_BIN, ["--version"], { stdio: "ignore" });
+    const proc = spawn(getCliBin("claude-code"), ["--version"], { stdio: "ignore" });
     proc.on("close", (code) => resolve(code === 0));
     proc.on("error", () => resolve(false));
   });
@@ -608,7 +612,7 @@ export async function quickCompleteClaudeCode(prompt: string): Promise<string> {
     );
   }
   return new Promise((resolve, reject) => {
-    const proc = spawn(CLAUDE_BIN, ["--print", prompt], {
+    const proc = spawn(getCliBin("claude-code"), ["--print", prompt], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";

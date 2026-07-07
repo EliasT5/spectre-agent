@@ -255,7 +255,7 @@ const BROKER_ENV_ALLOW = [
   "SPECTRE_AUTONOMOUS", "SPECTRE_AUTONOMOUS_THREAD", "SPECTRE_WORKSHOP", "SPECTRE_ENABLE_DISPATCH_TOOL",
   "SPECTRE_DATA_DIR", "SPECTRE_REPO_PATH", "SPECTRE_FILES_ROOT", "SPECTRE_GENERATED_DIR", "SPECTRE_STANDALONE_GENERATED_DIR",
   "SPECTRE_SHELL_URL", "SPECTRE_SHOTTER_URL", "SPECTRE_SHOTTER_COOKIE",
-  "SPECTRE_ALLOW_GEMINI_CLI", "SPECTRE_ALLOW_CODEX_CLI", "GEMINI_CLI_BIN", "CODEX_CLI_BIN", "CODEX_HOME",
+  "SPECTRE_ALLOW_GEMINI_CLI", "SPECTRE_ALLOW_CODEX_CLI", "SPECTRE_ALLOW_CLI_BACKENDS", "GEMINI_CLI_BIN", "CODEX_CLI_BIN", "CODEX_HOME",
   "SPECTRE_MCP_BROKER", "SPECTRE_MCP_BROKER_BIN", "SPECTRE_MCP_BROKER_PATH", "OLLAMA_HOST",
   // data tools may interpolate {env.X}, but only X in SPECTRE_TOOL_ENV_ALLOW (the
   // broker re-checks this); the allowlist itself must reach the broker to be read.
@@ -453,6 +453,80 @@ interface AccumulatedCall {
   args: string;
 }
 
+/**
+ * Scan text for balanced top-level `{...}` object substrings (string-aware), so we
+ * can recover a tool call a weak model emitted as TEXT instead of via the structured
+ * tool_calls channel.
+ */
+function* jsonObjectCandidates(text: string): Generator<string> {
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      if (depth > 0 && --depth === 0 && start >= 0) {
+        yield text.slice(start, i + 1);
+        start = -1;
+      }
+    }
+  }
+}
+
+/**
+ * Recover a tool call a model wrote as TEXT (a JSON blob in its reply) rather than
+ * emitting it via the structured tool_calls channel — common for small local models
+ * handed a large tool surface. Matches the usual shapes:
+ *   {"type":"function","function":{"name","parameters"|"arguments"}}
+ *   {"name","arguments"|"parameters"}   |   {"tool_calls":[…]}
+ * Only returns a call whose name is a REAL available tool (exact match), so an
+ * incidental JSON example isn't executed. Returns the first match, or null.
+ */
+function extractTextToolCall(text: string, valid: Set<string>): { name: string; args: string } | null {
+  if (!valid.size) return null;
+  for (const cand of jsonObjectCandidates(text)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(cand);
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object") continue;
+    const obj = parsed as Record<string, unknown>;
+    const shapes: Record<string, unknown>[] = [];
+    if (Array.isArray(obj.tool_calls)) {
+      for (const t of obj.tool_calls) {
+        if (t && typeof t === "object") {
+          const tt = t as Record<string, unknown>;
+          shapes.push((tt.function ?? tt) as Record<string, unknown>);
+        }
+      }
+    }
+    if (obj.function && typeof obj.function === "object") shapes.push(obj.function as Record<string, unknown>);
+    shapes.push(obj);
+    for (const fn of shapes) {
+      const name = fn?.name;
+      if (typeof name === "string" && valid.has(name)) {
+        const raw = (fn.arguments ?? fn.parameters ?? {}) as unknown;
+        const args = typeof raw === "string" ? raw : JSON.stringify(raw ?? {});
+        return { name, args };
+      }
+    }
+  }
+  return null;
+}
+
 /** Flatten an MCP tool result's content array into a plain string for the model. */
 function renderToolResult(res: {
   content?: Array<{ type?: string; text?: string }>;
@@ -612,7 +686,24 @@ export async function* streamLiteLLM(opts: StreamOptions): AsyncGenerator<Stream
         return;
       }
 
-      const toolCalls = calls.filter((c) => c && c.name);
+      let toolCalls = calls.filter((c) => c && c.name);
+
+      // Fallback for weak local models that EMIT a tool call as TEXT (a JSON blob in
+      // content) instead of using the structured tool_calls channel — recover it so
+      // the tool actually runs and renders as a tool chip, instead of the raw JSON
+      // leaking as the final answer. Only fires when the name is a real tool.
+      if (toolCalls.length === 0 && assistantText) {
+        const validNames = new Set(
+          broker.tools
+            .map((t) => (t as { function?: { name?: string } }).function?.name)
+            .filter((n): n is string => typeof n === "string"),
+        );
+        const recovered = extractTextToolCall(assistantText, validNames);
+        if (recovered) {
+          console.log(`[litellm] recovered text-emitted tool call: ${recovered.name}`);
+          toolCalls = [{ id: `call_text_${iter}`, name: recovered.name, args: recovered.args }];
+        }
+      }
 
       // No tool calls → the model produced its final answer. Done.
       if (toolCalls.length === 0) {

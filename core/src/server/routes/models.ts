@@ -8,7 +8,30 @@ import {
 } from "@/lib/ai";
 import { listLiteLLMModels } from "@/lib/ai/providers/litellm";
 import { listOllamaModels } from "@/lib/ai/providers/ollama";
-import { cliAllowed } from "@/lib/ai/cli-gate";
+import { cliAllowed, hasCliToken } from "@/lib/ai/cli-gate";
+import { listBackendsSync } from "@/lib/ai/backends/registry";
+import { CLI_BACKENDS_ALLOWED } from "@/lib/ai/backends/gate";
+import { createServiceSupabase } from "@/lib/supabase/server";
+
+/** User-defined display-name overrides for the model picker: { "<model id>": "Name" }. */
+async function getModelLabels(): Promise<Record<string, string>> {
+  try {
+    const supabase = createServiceSupabase();
+    const { data } = await supabase.from("app_config").select("value").eq("key", "model_labels").maybeSingle();
+    const v = data?.value;
+    const parsed = typeof v === "string" ? JSON.parse(v) : v;
+    if (parsed && typeof parsed === "object") {
+      const out: Record<string, string> = {};
+      for (const [k, val] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof val === "string" && val.trim()) out[k] = val.trim();
+      }
+      return out;
+    }
+  } catch {
+    /* fail-soft — no overrides */
+  }
+  return {};
+}
 
 // EXEMPLAR (lib import + async). Port of src/app/api/models/route.ts.
 export const models = new Hono();
@@ -147,7 +170,7 @@ function cliAvailability(
 }
 
 models.get("/", async (c) => {
-  const [liveProviderSet, litellmIds, ollamaIds, anthropicLive, openaiLive, googleLive] =
+  const [liveProviderSet, litellmIds, ollamaIds, anthropicLive, openaiLive, googleLive, modelLabels] =
     await Promise.all([
       detectProviders(),
       listLiteLLMModels(),
@@ -155,6 +178,7 @@ models.get("/", async (c) => {
       fetchAnthropicModels(),
       fetchOpenAIModels(),
       fetchGoogleModels(),
+      getModelLabels(),
     ]);
 
   const available = [...liveProviderSet] as Provider[];
@@ -168,8 +192,25 @@ models.get("/", async (c) => {
   const result: ModelEntry[] = [];
   const seenIds = new Set<string>();
 
-  // ── 1. Emit every catalog entry, enriched with availability ────────────────
+  // ── 1. Emit catalog entries for ADDED providers, enriched with availability ──
+  // Only surface a catalog model whose provider the user actually CONFIGURED
+  // ("added"): CLI enabled/authenticated, an API key set, the gateway/Ollama up.
+  // Aspirational entries that were never set up (CLIs off, no API key, Jerome
+  // without Claude) are hidden entirely. A model that WAS added but is now failing
+  // still shows — greyed, with a reason (key rejected, needs re-login, etc.).
   for (const m of MODEL_CATALOG) {
+    const p = m.provider;
+    let added: boolean;
+    if (p === "claude-code" || p === "codex-cli" || p === "gemini-cli") added = cliAllowed(p) || hasCliToken(p);
+    else if (p === "spectre-mode") added = cliAllowed("claude-code") || hasCliToken("claude-code");
+    else if (p === "litellm") added = liveProviderSet.has("litellm");
+    else if (p === "ollama") added = liveProviderSet.has("ollama") && ollamaLiveIds.has(m.id);
+    else if (p === "anthropic") added = !!process.env.ANTHROPIC_API_KEY;
+    else if (p === "openai") added = !!process.env.OPENAI_API_KEY;
+    else if (p === "google") added = !!process.env.GOOGLE_GENAI_API_KEY;
+    else added = true;
+    if (!added) continue; // never configured → hide, don't grey
+
     seenIds.add(m.id);
 
     let avail: boolean;
@@ -239,6 +280,25 @@ models.get("/", async (c) => {
 
   // ── 2. Add dynamically-discovered LiteLLM gateway models ──────────────────
   for (const id of litellmIds) {
+    // A gateway model that is ALSO a live local Ollama model → surface it as the
+    // "· tools" (agentic, via LiteLLM) variant under a `gateway:<id>` id, leaving the
+    // bare id for the fast, tool-less direct-Ollama entry (catalog or section 3). This
+    // lets the user pick the route per model. Checked BEFORE the seenIds skip so it
+    // still fires when the bare id was already emitted by the static catalog.
+    if (ollamaLiveIds.has(id)) {
+      const gid = `gateway:${id}`;
+      if (!seenIds.has(gid)) {
+        seenIds.add(gid);
+        result.push({
+          id: gid,
+          provider: "litellm",
+          displayName: `${humanizeModelName(id)} · tools`,
+          available: liveProviderSet.has("litellm"),
+          detected: true,
+        });
+      }
+      continue; // do NOT mark the bare id seen → the fast entry stays
+    }
     if (seenIds.has(id)) continue;
     seenIds.add(id);
     const reasoning = isReasoningModel(id);
@@ -322,6 +382,34 @@ models.get("/", async (c) => {
     };
     if (!googleUp) entry.unavailableReason = "set GOOGLE_GENAI_API_KEY to enable Google API models";
     result.push(entry);
+  }
+
+  // ── 7. Add user-taught cli-command backends selected as brains ────────────
+  // These are NOT on the gateway (they're raw text CLIs), so surface them from
+  // the registry with provider "cli-text". cli-server / api backends already
+  // appear via the litellm merge in section 2.
+  for (const b of listBackendsSync()) {
+    if (b.kind !== "cli-command" || !b.roles?.brain) continue;
+    if (seenIds.has(b.id)) continue;
+    seenIds.add(b.id);
+    const avail = CLI_BACKENDS_ALLOWED && b.enabled;
+    const entry: ModelEntry = {
+      id: b.id,
+      provider: "cli-text",
+      displayName: b.label,
+      available: avail,
+      detected: true,
+    };
+    if (!CLI_BACKENDS_ALLOWED) entry.unavailableReason = "set SPECTRE_ALLOW_CLI_BACKENDS=1 on the core to enable CLI backends";
+    else if (!b.enabled) entry.unavailableReason = "backend is disabled — enable it in Settings → Providers";
+    result.push(entry);
+  }
+
+  // Apply user-defined display-name overrides (Settings → Models rename). Keyed by
+  // model id, so it covers catalog, detected, ollama, api, and gateway: variants.
+  for (const e of result) {
+    const custom = modelLabels[e.id];
+    if (custom) e.displayName = custom;
   }
 
   return c.json({ providers: available, models: result });
