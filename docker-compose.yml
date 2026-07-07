@@ -52,6 +52,11 @@ services:
     # tagged locally; the runner services below reuse this same built image.
     build:
       context: ./core
+      args:
+        # Set INSTALL_CLAUDE_CLI=1 to bundle the Claude Code CLI into the image so
+        # the subscription "brain" works in the containerized core (needs
+        # CLAUDE_CODE_OAUTH_TOKEN in .env.docker + SPECTRE_ALLOW_CLI_UI=1).
+        INSTALL_CLAUDE_CLI: "${INSTALL_CLAUDE_CLI:-0}"
     image: spectre-core:local
     env_file: [.env.docker]
     environment:

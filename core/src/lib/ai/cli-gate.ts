@@ -50,6 +50,20 @@ export function cliAllowed(id: CliId): boolean {
   return envDefault(id);
 }
 
+// Runtime-set auth credentials (id -> token), entered from the UI so a CLI can be
+// authenticated with NO file edit / restart. The provider injects the token into the
+// spawned CLI's env at call time (e.g. claude-code → CLAUDE_CODE_OAUTH_TOKEN).
+const TOKENS_KEY = "cli_tokens";
+const tokens: Partial<Record<CliId, string>> = {};
+
+/** The runtime token for a CLI, if the operator set one via the UI. Sync. */
+export function getCliToken(id: CliId): string | undefined {
+  return tokens[id] || undefined;
+}
+export function hasCliToken(id: CliId): boolean {
+  return !!tokens[id];
+}
+
 export interface CliGateRow {
   id: CliId;
   label: string;
@@ -58,6 +72,14 @@ export interface CliGateRow {
   envVar: string;
   /** True when the UI is permitted to flip this CLI (the operator master flag). */
   canManage: boolean;
+  /** True when a runtime auth token has been set for this CLI (value never returned). */
+  hasToken: boolean;
+  /** True when a runtime binary path/command has been set (value returned as `bin`). */
+  hasBin: boolean;
+  /** The resolved command/path Spectre will spawn. */
+  bin: string;
+  /** True when the user has configured this CLI in any way (drives the modular card). */
+  added: boolean;
 }
 
 export function getCliGate(): { uiAllowed: boolean; items: CliGateRow[] } {
@@ -70,8 +92,78 @@ export function getCliGate(): { uiAllowed: boolean; items: CliGateRow[] } {
       envDefault: envDefault(id),
       envVar: META[id].envVar,
       canManage: CLI_UI_ALLOWED,
+      hasToken: hasCliToken(id),
+      hasBin: hasCliBin(id),
+      bin: getCliBin(id),
+      added: cliAdded(id),
     })),
   };
+}
+
+/** Set (or clear, when token is empty) a CLI's runtime auth token. UI-gated. */
+export async function setCliToken(id: CliId, token: string): Promise<void> {
+  if (!CLI_UI_ALLOWED) {
+    throw new Error(
+      "CLI management from the UI is disabled. Set SPECTRE_ALLOW_CLI_UI=1 on the core to enable it.",
+    );
+  }
+  if (token && token.trim()) tokens[id] = token.trim();
+  else delete tokens[id];
+  await persistTokens();
+}
+
+async function persistTokens(): Promise<void> {
+  try {
+    const supabase = createServiceSupabase();
+    await supabase.from("app_config").upsert(
+      { key: TOKENS_KEY, value: JSON.stringify(tokens), updated_at: new Date().toISOString() },
+      { onConflict: "key" },
+    );
+  } catch {
+    // Fail-soft: the in-memory token still works for this process.
+  }
+}
+
+// Runtime binary path override (id -> command or absolute path), set from the UI so
+// a known deep-integration CLI can be located without an env var. Falls back to the
+// env-configured META bin. This is what makes the CLI card modular: the user enters
+// `claude` (or a full path) and Spectre uses it.
+const BINS_KEY = "cli_bins";
+const bins: Partial<Record<CliId, string>> = {};
+
+/** Resolve the command/path for a CLI: UI override → env/META default. Sync. */
+export function getCliBin(id: CliId): string {
+  return bins[id] || META[id].bin;
+}
+export function hasCliBin(id: CliId): boolean {
+  return !!bins[id];
+}
+
+/** Set (or clear) a CLI's binary command/path from the UI. UI-gated. */
+export async function setCliBin(id: CliId, pathOrCmd: string): Promise<void> {
+  if (!CLI_UI_ALLOWED) {
+    throw new Error("CLI management from the UI is disabled. Set SPECTRE_ALLOW_CLI_UI=1 on the core.");
+  }
+  if (pathOrCmd && pathOrCmd.trim()) bins[id] = pathOrCmd.trim();
+  else delete bins[id];
+  await persistBins();
+}
+
+async function persistBins(): Promise<void> {
+  try {
+    const supabase = createServiceSupabase();
+    await supabase.from("app_config").upsert(
+      { key: BINS_KEY, value: JSON.stringify(bins), updated_at: new Date().toISOString() },
+      { onConflict: "key" },
+    );
+  } catch {
+    // Fail-soft.
+  }
+}
+
+/** Is this CLI "added" (the user configured it in any way)? Drives the modular card. */
+export function cliAdded(id: CliId): boolean {
+  return cliAllowed(id) || hasCliToken(id) || hasCliBin(id);
 }
 
 /** Flip a CLI at runtime. Throws (with a clear reason) when not permitted. */
@@ -116,6 +208,30 @@ export async function hydrateCliGate(): Promise<void> {
         if (typeof parsed[id] === "boolean") override[id] = parsed[id];
       }
     }
+    // Runtime auth tokens set via the UI (cli_tokens).
+    const { data: tokRow } = await supabase
+      .from("app_config")
+      .select("value")
+      .eq("key", TOKENS_KEY)
+      .maybeSingle();
+    if (tokRow?.value) {
+      const parsed = JSON.parse(tokRow.value as string) as Partial<Record<CliId, string>>;
+      for (const id of CLI_IDS) {
+        if (typeof parsed[id] === "string" && parsed[id]) tokens[id] = parsed[id];
+      }
+    }
+    // Runtime binary path overrides (cli_bins).
+    const { data: binRow } = await supabase
+      .from("app_config")
+      .select("value")
+      .eq("key", BINS_KEY)
+      .maybeSingle();
+    if (binRow?.value) {
+      const parsed = JSON.parse(binRow.value as string) as Partial<Record<CliId, string>>;
+      for (const id of CLI_IDS) {
+        if (typeof parsed[id] === "string" && parsed[id]) bins[id] = parsed[id];
+      }
+    }
   } catch {
     // Fail-soft: env defaults stand.
   }
@@ -132,7 +248,7 @@ void hydrateCliGate();
  * CLI installed on PATH?" regardless of whether it's currently enabled.
  */
 export function probeCliBinary(id: CliId): Promise<boolean> {
-  const { bin } = META[id];
+  const bin = getCliBin(id);
   return new Promise((resolve) => {
     try {
       const proc = spawn(bin, ["--version"], { stdio: "ignore" });
