@@ -15,7 +15,7 @@
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 
-export type ExtKind = "skills" | "tools" | "mcp" | "modules";
+export type ExtKind = "skills" | "tools" | "mcp" | "modules" | "backends";
 
 /** Repo/working root the baked built-ins live under (cwd in the prod image). */
 export function projectRoot(): string {
@@ -104,6 +104,35 @@ export function loadMcpServers(): McpServerSpec[] {
     }
   }
   return [...map.values()];
+}
+
+/**
+ * Load raw model-backend specs from `backends/backends.json` (built-in overlaid
+ * by user; a user entry with the same id wins). Shape:
+ *   { "backends": { "<id>": { …ModelBackend spec… } } }
+ * Returns raw objects keyed by id — the caller (registry) validates them with the
+ * zod schema. Fail-safe: a bad file is skipped, never throws. This is the SAME
+ * file the mcp-broker reads to register cli-dispatch tools (it has no DB access),
+ * so the registry keeps it materialized from the DB.
+ */
+export function loadModelBackendSpecs(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [, dir] of overlayDirs("backends")) {
+    const file = join(dir, "backends.json");
+    if (!existsSync(file)) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(file, "utf-8"));
+    } catch {
+      continue;
+    }
+    const backends = (parsed as { backends?: unknown })?.backends;
+    if (!backends || typeof backends !== "object") continue;
+    for (const [id, raw] of Object.entries(backends as Record<string, unknown>)) {
+      if (raw && typeof raw === "object") out[id] = raw; // user dir last → overrides
+    }
+  }
+  return out;
 }
 
 export interface LoadedSkill {

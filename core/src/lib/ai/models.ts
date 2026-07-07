@@ -11,7 +11,10 @@ export type Provider =
   | "gemini-cli"
   | "codex-cli"
   | "ollama"
-  | "spectre-mode";
+  | "spectre-mode"
+  // User-taught cli-command backends selected as a (chat-only) brain. One generic
+  // streamer serves all of them; the specific backend id rides ModelDef.cliModel.
+  | "cli-text";
 
 export type Capability =
   | "coding"

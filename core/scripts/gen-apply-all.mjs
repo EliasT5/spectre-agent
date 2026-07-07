@@ -27,6 +27,7 @@ const ORDER = [
   "messages-embeddings.sql",
   "ingest.sql",
   "modules.sql",
+  "model_backends.sql",
   "module-data.sql",
   "monitor_events.sql",
   "notes.sql",

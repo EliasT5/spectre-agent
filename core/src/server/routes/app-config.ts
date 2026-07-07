@@ -20,6 +20,8 @@ const PUBLIC_CONFIG_KEYS = new Set([
   "orchestrate",
   "orchestration_targets",
   "reasoning_effort",
+  // User-defined model display-name overrides for the picker: { "<model id>": "Name" }.
+  "model_labels",
 ]);
 
 appConfig.get("/:key", async (c) => {

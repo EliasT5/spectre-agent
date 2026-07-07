@@ -100,4 +100,6 @@ export const PROVIDER_ENV_KEYS: Record<Provider, string | null> = {
   "codex-cli": null,
   ollama: null,
   "spectre-mode": null,
+  // Gated by SPECTRE_ALLOW_CLI_BACKENDS + an enabled cli-command brain (not a single env key).
+  "cli-text": null,
 };

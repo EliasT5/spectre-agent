@@ -15,12 +15,23 @@ import { streamClaudeCode, isClaudeCodeAvailable, quickCompleteClaudeCode } from
 import { streamGeminiCli, isGeminiCliAvailable, quickCompleteGeminiCli } from "./providers/gemini-cli";
 import { streamCodexCli, isCodexCliAvailable, quickCompleteCodexCli } from "./providers/codex-cli";
 import { cliAllowed } from "./cli-gate";
-import { streamOllama, isOllamaAvailable, quickCompleteOllama } from "./providers/ollama";
+import { streamOllama, isOllamaAvailable, quickCompleteOllama, listOllamaModels } from "./providers/ollama";
 import { streamJerome, isJeromeAvailable } from "./providers/jerome";
+import { streamCliText } from "./backends/cli-text-streamer";
+import { CLI_BACKENDS_ALLOWED } from "./backends/gate";
+import { listBackendsSync } from "./backends/registry";
 
 export type { ChatMessage, StreamChunk, StreamOptions } from "./providers/types";
 
 // ── Provider availability ──────────────────────────────────────
+
+/** cli-text is available when the master flag is on AND an enabled cli-command brain exists. */
+function cliTextAvailable(): boolean {
+  return (
+    CLI_BACKENDS_ALLOWED &&
+    listBackendsSync().some((b) => b.kind === "cli-command" && b.enabled && b.roles?.brain)
+  );
+}
 
 const availableProviders = new Set<Provider>();
 let detected = false;
@@ -52,7 +63,11 @@ export function detectProviders(): Promise<Set<Provider>> {
     if (claudeOk) next.add("claude-code");
     if (geminiOk) next.add("gemini-cli");
     if (codexOk) next.add("codex-cli");
-    if (ollamaOk) next.add("ollama");
+    if (ollamaOk) {
+      next.add("ollama");
+      void listOllamaModels(); // warm the sync cache route() reads
+    }
+    if (cliTextAvailable()) next.add("cli-text");
     // Jerome Mode reuses the Claude Code subscription for its brain, so
     // it\'s available exactly when claude-code is.
     if (await isJeromeAvailable()) next.add("spectre-mode");
@@ -85,6 +100,7 @@ export function isProviderAvailable(provider: Provider): boolean {
     if (provider === "gemini-cli") return cliAllowed("gemini-cli");
     if (provider === "codex-cli") return cliAllowed("codex-cli");
     if (provider === "ollama") return true; // local, no ToS gate
+    if (provider === "cli-text") return cliTextAvailable();
     const envVar = PROVIDER_ENV_KEYS[provider];
     return !!(envVar && process.env[envVar]);
   }
@@ -108,6 +124,7 @@ const streamers: Record<Provider, Streamer> = {
   "codex-cli": streamCodexCli,
   ollama: streamOllama,
   "spectre-mode": streamJerome,
+  "cli-text": streamCliText,
 };
 
 export function streamChat(opts: StreamOptions): AsyncGenerator<StreamChunk> {

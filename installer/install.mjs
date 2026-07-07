@@ -133,7 +133,7 @@ export function parseEnv(body) {
 const CONTRACT_KEYS = new Set([
   "CORE_TOKEN", "PIN_HASH", "SESSION_SECRET", "LITELLM_MASTER_KEY",
   "SPECTRE_LITELLM_MODEL", "SPECTRE_SERVICE_TOKEN",
-  "SPECTRE_ALLOW_CLAUDE_CLI", "SPECTRE_ALLOW_CODEX_CLI", "SPECTRE_ALLOW_GEMINI_CLI",
+  "SPECTRE_ALLOW_CLAUDE_CLI", "SPECTRE_ALLOW_CODEX_CLI", "SPECTRE_ALLOW_GEMINI_CLI", "SPECTRE_ALLOW_CLI_BACKENDS",
   "WORKSPACE_SERVICE_TOKEN", "WORKSPACE_TRUSTED_DIRS", "CODE_SERVER_PASSWORD",
   "GH_TOKEN", "COMPOSE_PROFILES",
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_ALLOWED_SENDER_IDS",
@@ -160,6 +160,9 @@ export function buildEnv(v, seed = {}) {
     SPECTRE_ALLOW_CLAUDE_CLI: v.SPECTRE_ALLOW_CLAUDE_CLI ?? "",
     SPECTRE_ALLOW_CODEX_CLI: v.SPECTRE_ALLOW_CODEX_CLI ?? "",
     SPECTRE_ALLOW_GEMINI_CLI: v.SPECTRE_ALLOW_GEMINI_CLI ?? "",
+    // User-taught model backends whose cli-server/cli-command kinds spawn operator
+    // commands (RCE by design) — off by default, opt in like the CLI-UI flag.
+    SPECTRE_ALLOW_CLI_BACKENDS: v.SPECTRE_ALLOW_CLI_BACKENDS ?? "",
     // Workspaces (opt-in `--profile workspace`): the shell->workspace-service token,
     // optional GitHub token for clone/push/PR, and trusted local folders.
     WORKSPACE_SERVICE_TOKEN: v.WORKSPACE_SERVICE_TOKEN,
