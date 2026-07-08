@@ -1,51 +1,30 @@
 import { createServiceSupabase } from "@/lib/supabase/server";
+import { getMsGraphClientId, getMsGraphClientSecret, getMsGraphTenant } from "./creds";
+import {
+  listAccounts,
+  updateAccountTokens,
+  upsertAccount,
+  type ConnectedAccount,
+} from "@/lib/accounts";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
 function tokenEndpoint() {
-  const tenant = process.env.MS_GRAPH_TENANT_ID || "common";
-  return `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
+  return `https://login.microsoftonline.com/${getMsGraphTenant()}/oauth2/v2.0/token`;
 }
 
-export const GRAPH_SCOPES = "User.Read Calendars.Read offline_access";
+export const GRAPH_SCOPES = "User.Read Calendars.Read Mail.Read offline_access";
 
-export interface MsGraphTokens {
+interface RefreshedTokens {
   access_token: string;
   refresh_token: string;
-  expires_at: string; // ISO timestamp
-  user_email?: string;
-  user_name?: string;
+  expires_at: string; // ISO
 }
 
-export async function getStoredTokens(): Promise<MsGraphTokens | null> {
-  const supabase = createServiceSupabase();
-  const { data } = await supabase
-    .from("app_config")
-    .select("value")
-    .eq("key", "ms_graph_tokens")
-    .maybeSingle();
-  return (data?.value as MsGraphTokens | null) ?? null;
-}
-
-export async function saveTokens(tokens: MsGraphTokens): Promise<void> {
-  const supabase = createServiceSupabase();
-  await supabase
-    .from("app_config")
-    .upsert(
-      { key: "ms_graph_tokens", value: tokens, updated_at: new Date().toISOString() },
-      { onConflict: "key" }
-    );
-}
-
-export async function deleteTokens(): Promise<void> {
-  const supabase = createServiceSupabase();
-  await supabase.from("app_config").delete().eq("key", "ms_graph_tokens");
-}
-
-async function doRefresh(refreshToken: string): Promise<Omit<MsGraphTokens, "user_email" | "user_name">> {
+async function doRefresh(refreshToken: string): Promise<RefreshedTokens> {
   const params = new URLSearchParams({
-    client_id: process.env.MS_GRAPH_CLIENT_ID!,
-    client_secret: process.env.MS_GRAPH_CLIENT_SECRET!,
+    client_id: getMsGraphClientId(),
+    client_secret: getMsGraphClientSecret(),
     refresh_token: refreshToken,
     grant_type: "refresh_token",
     scope: GRAPH_SCOPES,
@@ -64,27 +43,27 @@ async function doRefresh(refreshToken: string): Promise<Omit<MsGraphTokens, "use
   };
 }
 
-export async function getValidAccessToken(): Promise<string | null> {
-  const tokens = await getStoredTokens();
-  if (!tokens) return null;
-
-  // Refresh 5 minutes before expiry
-  if (new Date(tokens.expires_at).getTime() < Date.now() + 5 * 60 * 1000) {
-    const refreshed = await doRefresh(tokens.refresh_token);
-    await saveTokens({ ...refreshed, user_email: tokens.user_email, user_name: tokens.user_name });
-    return refreshed.access_token;
-  }
-  return tokens.access_token;
+/** All connected Microsoft accounts. */
+export function listMsAccounts(): Promise<ConnectedAccount[]> {
+  return listAccounts("microsoft");
 }
 
-export async function graphFetch<T>(path: string): Promise<T> {
-  const accessToken = await getValidAccessToken();
-  if (!accessToken) throw new Error("Microsoft 365 not connected");
+/** A valid access token for ONE account, refreshing (and persisting) near expiry. */
+export async function getValidAccessTokenForAccount(acct: ConnectedAccount): Promise<string> {
+  const expMs = acct.expires_at ? new Date(acct.expires_at).getTime() : 0;
+  if (expMs < Date.now() + 5 * 60 * 1000) {
+    const refreshed = await doRefresh(acct.refresh_token);
+    await updateAccountTokens(acct.id, refreshed);
+    return refreshed.access_token;
+  }
+  return acct.access_token;
+}
+
+/** Graph GET for one account. */
+export async function graphFetchForAccount<T>(acct: ConnectedAccount, path: string): Promise<T> {
+  const accessToken = await getValidAccessTokenForAccount(acct);
   const res = await fetch(`${GRAPH_BASE}${path}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-    },
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
   });
   if (!res.ok) {
     const body = await res.text();
@@ -92,3 +71,33 @@ export async function graphFetch<T>(path: string): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
+
+/**
+ * One-time import of the legacy single-account token (app_config 'ms_graph_tokens')
+ * into connected_accounts, then delete the legacy key. No-op if absent. Keeps an
+ * already-connected account working across the multi-account switch.
+ */
+export async function migrateLegacyMsToken(): Promise<void> {
+  try {
+    const supabase = createServiceSupabase();
+    const { data } = await supabase.from("app_config").select("value").eq("key", "ms_graph_tokens").maybeSingle();
+    const t = data?.value as
+      | { access_token?: string; refresh_token?: string; expires_at?: string; user_email?: string; user_name?: string }
+      | null;
+    if (!t?.access_token || !t?.refresh_token) return;
+    await upsertAccount({
+      provider: "microsoft",
+      account_email: t.user_email || "microsoft-account",
+      account_name: t.user_name ?? null,
+      access_token: t.access_token,
+      refresh_token: t.refresh_token,
+      expires_at: t.expires_at ?? null,
+      scopes: GRAPH_SCOPES,
+    });
+    await supabase.from("app_config").delete().eq("key", "ms_graph_tokens");
+  } catch {
+    /* fail-soft */
+  }
+}
+
+void migrateLegacyMsToken();

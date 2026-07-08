@@ -767,7 +767,7 @@ server.registerTool(
   "calendar.today",
   {
     description:
-      "Return today's calendar events from the connected Microsoft 365 account. Returns an error if MS 365 is not connected.",
+      "Return today's calendar events, merged across ALL connected Microsoft 365 accounts. Returns an error if no MS 365 account is connected.",
     inputSchema: {},
   },
   async () => {
@@ -778,11 +778,13 @@ server.registerTool(
       if (events.length === 0) {
         return { content: [{ type: "text", text: "No events today." }] };
       }
+      const multi = (data?.accounts?.length ?? 0) > 1;
       const lines = events.map((e) => {
         const start = e.isAllDay ? "all day" : new Date(e.start.dateTime).toLocaleTimeString("en-AT", { hour: "2-digit", minute: "2-digit" });
         const end = e.isAllDay ? "" : `–${new Date(e.end.dateTime).toLocaleTimeString("en-AT", { hour: "2-digit", minute: "2-digit" })}`;
         const loc = e.location?.displayName ? ` @ ${e.location.displayName}` : "";
-        return `• ${start}${end}${loc}  ${e.subject}`;
+        const who = multi && e.account ? `  ·  ${e.account}` : "";
+        return `• ${start}${end}${loc}  ${e.subject}${who}`;
       });
       return { content: [{ type: "text", text: lines.join("\n") }] };
     } catch (err) {
@@ -795,7 +797,7 @@ server.registerTool(
   "calendar.upcoming",
   {
     description:
-      "Return upcoming calendar events for the next N days (default 7) from the connected Microsoft 365 account.",
+      "Return upcoming calendar events for the next N days (default 7), merged across ALL connected Microsoft 365 accounts.",
     inputSchema: {
       days: z.number().int().min(1).max(30).optional().describe("Number of days to look ahead (default: 7)"),
     },
@@ -813,15 +815,168 @@ server.registerTool(
       if (events.length === 0) {
         return { content: [{ type: "text", text: `No events in the next ${days} day${days === 1 ? "" : "s"}.` }] };
       }
+      const multi = (data?.accounts?.length ?? 0) > 1;
       const lines = events.map((e) => {
         const date = new Date(e.start.dateTime).toLocaleDateString("en-AT", { weekday: "short", month: "short", day: "numeric" });
         const time = e.isAllDay ? "all day" : new Date(e.start.dateTime).toLocaleTimeString("en-AT", { hour: "2-digit", minute: "2-digit" });
         const loc = e.location?.displayName ? ` @ ${e.location.displayName}` : "";
-        return `• ${date} ${time}${loc}  ${e.subject}`;
+        const who = multi && e.account ? `  ·  ${e.account}` : "";
+        return `• ${date} ${time}${loc}  ${e.subject}${who}`;
       });
       return { content: [{ type: "text", text: lines.join("\n") }] };
     } catch (err) {
       return toolErr("calendar.upcoming", err);
+    }
+  }
+);
+
+/* ────────────────────────────── mail ──────────────────────────────── */
+
+server.registerTool(
+  "mail.list",
+  {
+    description:
+      "List recent emails — or search with a query — across ALL connected Microsoft 365 + Google accounts (read-only, live, nothing stored). Each result shows from / subject / snippet plus an [account_id … id …] handle; pass those to mail.read to read the full message. Errors if no mail account is connected.",
+    inputSchema: {
+      query: z.string().optional().describe("search text (e.g. 'from:boss invoice'); omit for the most recent"),
+      count: z.number().int().min(1).max(25).optional().describe("max messages (default 10)"),
+    },
+  },
+  async ({ query = "", count = 10 }) => {
+    const gate = await autonomyGate("mcp__spectre__mail_list"); if (gate !== true) return gate;
+    try {
+      const params = new URLSearchParams();
+      if (query) params.set("q", query);
+      params.set("count", String(count));
+      const data = await memoryFetch(`/mail/messages?${params}`);
+      const msgs = data?.messages ?? [];
+      if (msgs.length === 0) {
+        return { content: [{ type: "text", text: query ? "No matching emails." : "No recent emails." }] };
+      }
+      const multi = (data?.accounts?.length ?? 0) > 1;
+      const lines = msgs.map((m) => {
+        const date = m.date ? new Date(m.date).toLocaleString("en-AT", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+        const who = multi ? `  ·  ${m.account}` : "";
+        const unread = m.isRead ? "  " : "• ";
+        return `${unread}${date}  ${m.from}${who}\n   ${m.subject}\n   ${m.snippet}\n   [account_id:${m.account_id} id:${m.id}]`;
+      });
+      return { content: [{ type: "text", text: lines.join("\n\n") }] };
+    } catch (err) {
+      return toolErr("mail.list", err);
+    }
+  }
+);
+
+server.registerTool(
+  "mail.read",
+  {
+    description:
+      "Read one full email by account_id + id (both taken from a mail.list result). Returns the plain-text body with From/To/Date/Subject.",
+    inputSchema: {
+      account_id: z.string().describe("the account_id from mail.list"),
+      id: z.string().describe("the message id from mail.list"),
+    },
+  },
+  async ({ account_id, id }) => {
+    const gate = await autonomyGate("mcp__spectre__mail_read"); if (gate !== true) return gate;
+    try {
+      const params = new URLSearchParams({ account_id, id });
+      const m = await memoryFetch(`/mail/message?${params}`);
+      const text = `From: ${m.from}\nTo: ${m.to}\nDate: ${m.date}\nSubject: ${m.subject}\n\n${m.body}`;
+      return { content: [{ type: "text", text }] };
+    } catch (err) {
+      return toolErr("mail.read", err);
+    }
+  }
+);
+
+/* ─────────────────────────────── setup ────────────────────────────── */
+// Connector/integration setup helpers — let Spectre guide + do parts of setup in
+// chat. Writes go through requireApproval so the user confirms before anything is
+// saved. See the 'connector-setup' skill for how to use these.
+
+server.registerTool(
+  "setup.status",
+  {
+    description:
+      "Show which integrations are connected (Microsoft, Google, GitHub, channels, web push, workspace, model gateway, database) and which CLI brains are installed. Call this first when helping the user set something up.",
+    inputSchema: {},
+  },
+  async () => {
+    const gate = await autonomyGate("mcp__spectre__setup_status"); if (gate !== true) return gate;
+    try {
+      const data = await appFetch("/connectors");
+      const icon = (s) => (s === "connected" ? "✓" : s === "off" ? "✗" : s === "error" ? "!" : "…");
+      const lines = (data?.connectors ?? []).map((c) => `${icon(c.status)} ${c.name}: ${c.status}${c.detail ? ` (${c.detail})` : ""}`);
+      return { content: [{ type: "text", text: lines.join("\n") || "No connectors reported." }] };
+    } catch (err) {
+      return toolErr("setup.status", err);
+    }
+  }
+);
+
+server.registerTool(
+  "setup.add_cli",
+  {
+    description:
+      "Register any command-line tool as a pickable model brain (e.g. grok, qwen, a local script), so the user isn't limited to the built-in Claude/Codex/Gemini. The binary must already exist in the core container. Args may use {model}. Confirm the command with the user first.",
+    inputSchema: {
+      name: z.string().describe("display name, e.g. 'Grok'"),
+      command: z.string().describe("the command to run, e.g. 'grok'"),
+      args: z.string().optional().describe("space-separated args, e.g. 'exec --model {model}'"),
+      env_name: z.string().optional().describe("auth env var name, e.g. XAI_API_KEY"),
+      env_value: z.string().optional().describe("auth env var value"),
+    },
+  },
+  async ({ name, command, args, env_name, env_value }) => {
+    const gate = await autonomyGate("mcp__spectre__setup_add_cli"); if (gate !== true) return gate;
+    await requireApproval("mcp__spectre__setup_add_cli", { name, command, args });
+    try {
+      const id = (name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "custom") + "-cli";
+      const body = {
+        schemaVersion: 1, id, label: name, kind: "cli-command",
+        command, args: args && args.trim() ? args.trim().split(/\s+/) : [],
+        promptMode: "stdin", outputMode: "stdout", roles: { brain: true, dispatch: true },
+      };
+      if (env_name && env_value) body.env = { [env_name]: env_value };
+      await appFetch("/providers/backends", { method: "POST", body: JSON.stringify(body) });
+      return { content: [{ type: "text", text: `Added "${name}" (id ${id}) as a brain — it's now in the model picker. Reminder: its binary must be installed in the core container.` }] };
+    } catch (err) {
+      return toolErr("setup.add_cli", err);
+    }
+  }
+);
+
+server.registerTool(
+  "setup.save_secret",
+  {
+    description:
+      "Save a credential the user gives you into the right connector. Use for: github_token; cli_token (also pass cli_id: claude-code | codex-cli | gemini-cli); telegram_bot_token; whatsapp_token; discord_bot_token. For Microsoft/Google OAuth, guide the user to Settings instead (those aren't plain tokens). The user is asked to confirm before it saves.",
+    inputSchema: {
+      target: z.enum(["github_token", "cli_token", "telegram_bot_token", "whatsapp_token", "discord_bot_token"]),
+      value: z.string().describe("the secret/token value"),
+      cli_id: z.enum(["claude-code", "codex-cli", "gemini-cli"]).optional().describe("required when target is cli_token"),
+    },
+  },
+  async ({ target, value, cli_id }) => {
+    const gate = await autonomyGate("mcp__spectre__setup_save_secret"); if (gate !== true) return gate;
+    await requireApproval("mcp__spectre__setup_save_secret", { target, cli_id });
+    try {
+      if (target === "github_token") {
+        await appFetch("/providers/github/token", { method: "PUT", body: JSON.stringify({ token: value }) });
+      } else if (target === "cli_token") {
+        if (!cli_id) throw new Error("cli_id is required for cli_token");
+        await appFetch("/providers/cli/token", { method: "PUT", body: JSON.stringify({ id: cli_id, token: value }) });
+      } else if (target === "telegram_bot_token") {
+        await appFetch("/providers/channels", { method: "PUT", body: JSON.stringify({ telegram: { botToken: value } }) });
+      } else if (target === "whatsapp_token") {
+        await appFetch("/providers/channels", { method: "PUT", body: JSON.stringify({ whatsapp: { token: value } }) });
+      } else if (target === "discord_bot_token") {
+        await appFetch("/providers/channels", { method: "PUT", body: JSON.stringify({ discord: { botToken: value } }) });
+      }
+      return { content: [{ type: "text", text: `Saved ${target}${cli_id ? ` (${cli_id})` : ""}. ✓ Call setup.status to confirm.` }] };
+    } catch (err) {
+      return toolErr("setup.save_secret", err);
     }
   }
 );
@@ -1060,17 +1215,18 @@ server.registerTool(
 
 /* ───────────────────────────── tempus ─────────────────────────────── */
 
-// Tempus data now lives in Jerome's Supabase-backed API.
-const TEMPUS_API_URL = "http://127.0.0.1:3000/api/tempus";
+// Tempus data lives in the core's Supabase-backed API at /api/tempus. Reach it
+// the same way memoryFetch/appFetch do — via APP_URL (the core, :8787) with
+// authHeaders (X-Spectre-Service-Token + x-spectre-core-token). The old
+// hardcoded :3000 was a monolith leftover: the broker runs inside the core
+// container, nothing listens on :3000 there, and /api/* is CORE_TOKEN-gated —
+// so every tempus tool failed with ECONNREFUSED (or a 401 at the right port).
+const TEMPUS_API_URL = `${APP_URL}/api/tempus`;
 
 async function tempusFetch(path, opts = {}) {
   const res = await fetch(`${TEMPUS_API_URL}${path}`, {
     ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...opts.headers,
-    },
+    headers: authHeaders(opts),
   });
   const text = await res.text();
   const data = text ? safeJson(text) : null;

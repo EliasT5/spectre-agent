@@ -53,10 +53,10 @@ services:
     build:
       context: ./core
       args:
-        # Set INSTALL_CLAUDE_CLI=1 to bundle the Claude Code CLI into the image so
-        # the subscription "brain" works in the containerized core (needs
-        # CLAUDE_CODE_OAUTH_TOKEN in .env.docker + SPECTRE_ALLOW_CLI_UI=1).
-        INSTALL_CLAUDE_CLI: "${INSTALL_CLAUDE_CLI:-0}"
+        # Set INSTALL_CLIS=1 (in .env.docker) to bundle the Claude Code + Codex CLIs
+        # into the image so the subscription "brains" work in the containerized core.
+        # Auth is set at runtime in Settings (SPECTRE_ALLOW_CLI_UI=1), no rebuild.
+        INSTALL_CLIS: "${INSTALL_CLIS:-0}"
     image: spectre-core:local
     env_file: [.env.docker]
     environment:
@@ -202,9 +202,9 @@ services:
     expose: ["8010"]
     volumes:
       - "spectre-workspaces:/workspaces"
-      # TRUSTED folders: bind-mount each host path listed in WORKSPACE_TRUSTED_DIRS
-      # to the SAME path inside the container (code-server needs it too). e.g.:
-      # - "/home/me/project:/home/me/project"
+      # TRUSTED folders: bind-mount each host path to the container path listed in
+      # WORKSPACE_TRUSTED_DIRS (the Workspace tab edits them in place via Monaco).
+      - "C:/Users/elias/projects/spectre_dev:/trusted/spectre_dev"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     cap_drop: [ALL]
@@ -228,7 +228,10 @@ services:
     expose: ["8080"]
     volumes:
       - "spectre-workspaces:/workspaces"
-      # Mirror the same trusted-folder bind-mounts here so the editor can open them.
+      # Mirror the trusted-folder bind-mounts so the embedded editor can open them.
+      - "C:/Users/elias/projects/spectre_dev:/trusted/spectre_dev"
+      # Seed a dark default theme + editor prefs (persists on the host).
+      - "./deploy/code-server-user:/home/coder/.local/share/code-server/User"
     ports:
       - "${CODE_SERVER_BIND:-127.0.0.1}:${CODE_SERVER_PORT:-8088}:8080"
     # The image ships passwordless sudo for the coder user; no-new-privileges

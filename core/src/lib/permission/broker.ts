@@ -20,6 +20,7 @@
 
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { safeEqual } from "@/lib/auth/ct";
+import { getDangerSettings } from "@/lib/danger-settings";
 
 export type PermissionDecision = "allow" | "deny" | "allow_session";
 
@@ -310,6 +311,24 @@ export function listPending(): Array<{
   }));
 }
 
+/**
+ * Danger Zone: does this tool call read or touch a `.env*` secrets file? Covers
+ * the agent's file tools — bash (the command references .env), write/edit (the
+ * file_path is a .env file). Matches `.env`, `.env.docker`, `.env.local`, etc.
+ */
+function touchesEnvFile(tool: string, input: unknown): boolean {
+  if (!input || typeof input !== "object") return false;
+  const o = input as Record<string, unknown>;
+  const isEnvPath = (p: unknown) =>
+    typeof p === "string" && /(^|[\\/])\.env(\.[\w.-]+)?$/.test(p.trim());
+  if (tool === "write" || tool === "edit") return isEnvPath(o.file_path);
+  if (tool === "bash") {
+    return typeof o.command === "string" &&
+      /(?:^|[\s"'`=<>|&;:()/\\])\.env(?:\.[\w.-]+)?\b/.test(o.command);
+  }
+  return false;
+}
+
 export async function enqueue(
   threadId: string,
   tool: string,
@@ -324,6 +343,14 @@ export async function enqueue(
    */
   abortSignal?: AbortSignal
 ): Promise<PermissionResolution> {
+  // 0. Danger Zone: block reading/touching .env secrets files unless the operator
+  //    enabled it in Settings → Danger Zone. Runs before any policy/auto-allow, so
+  //    an always_allow policy (or an autonomous run) can never bypass it.
+  if (!getDangerSettings().allowEnvAccess && touchesEnvFile(tool, input)) {
+    logCall(tool, threadId, "deny", autonomous);
+    return { decision: "deny", reason: ".env access is off — enable it in Settings → Danger Zone" };
+  }
+
   // 1. Consult any persistent policy before troubling a human.
   //
   //    lookupPolicy returns one of three values:

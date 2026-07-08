@@ -1,18 +1,6 @@
 import webpush from "web-push";
 import { createServiceSupabase } from "@/lib/supabase/server";
-
-const vapidConfigured =
-  process.env.VAPID_SUBJECT &&
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY &&
-  process.env.VAPID_PRIVATE_KEY;
-
-if (vapidConfigured) {
-  webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT!,
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-    process.env.VAPID_PRIVATE_KEY!
-  );
-}
+import { getVapidSubject, getVapidPublicKey, getVapidPrivateKey, hasVapid } from "@/lib/vapid";
 
 export interface PushPayload {
   title: string;
@@ -21,7 +9,12 @@ export interface PushPayload {
 }
 
 export async function sendPush(payload: PushPayload): Promise<void> {
-  if (!vapidConfigured) return;
+  if (!hasVapid()) return;
+  const vapidDetails = {
+    subject: getVapidSubject(),
+    publicKey: getVapidPublicKey(),
+    privateKey: getVapidPrivateKey(),
+  };
 
   const supabase = createServiceSupabase();
   const { data: subs } = await supabase
@@ -37,7 +30,8 @@ export async function sendPush(payload: PushPayload): Promise<void> {
       try {
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-          JSON.stringify(payload)
+          JSON.stringify(payload),
+          { vapidDetails }
         );
       } catch (err: unknown) {
         const status = (err as { statusCode?: number })?.statusCode;

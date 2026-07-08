@@ -1,0 +1,101 @@
+/* ============================================================================
+   CHAT tab — co-located styles (Jerome design language, semantic CSS only)
+   Uses only CSS custom properties defined in globals.css.
+   No Tailwind. No edits to globals.css.
+
+   Focus: viewport containment for markdown replies. Wide content (fenced
+   code, GFM tables, images) must scroll or shrink inside its own box —
+   it must never widen the bubble, the .messages scroller, or the page.
+   ========================================================================== */
+
+/* ── markdown body rhythm (tight chat spacing) ─────────────────────────────── */
+.chat-md { overflow-wrap: break-word; }
+.chat-md p { margin: 4px 0; }
+.chat-md h1 { margin: 8px 0 4px; font-size: 17px; font-weight: 600; }
+.chat-md h2 { margin: 8px 0 4px; font-size: 15px; font-weight: 600; }
+.chat-md h3 { margin: 6px 0 4px; font-size: 14px; font-weight: 600; }
+.chat-md ul, .chat-md ol { margin: 4px 0; padding-left: 20px; }
+.chat-md ul { list-style: disc; }
+.chat-md ol { list-style: decimal; }
+.chat-md li { margin: 2px 0; }
+.chat-md a {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-md strong { font-weight: 600; color: var(--color-text); }
+.chat-md em { font-style: italic; color: var(--color-text-secondary); }
+.chat-md hr { margin: 8px 0; border: 0; border-top: 1px solid var(--color-border); }
+.chat-md blockquote {
+  margin: 6px 0;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: color-mix(in srgb, var(--color-surface) 40%, transparent);
+  color: var(--color-text-secondary);
+}
+
+/* inline code run */
+.chat-md code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-accent-hover);
+}
+
+/* fenced code slab — scrolls on BOTH axes inside its own box so long lines
+   never push the bubble (or the page) wider, and tall dumps never grow the
+   turn beyond a screen. */
+.chat-md pre {
+  margin: 6px 0;
+  padding: 10px;
+  max-height: 28rem;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--color-bg-alt) 80%, transparent);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.chat-md pre code {
+  display: block;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* GFM table — the wrapper owns horizontal scroll; the table never widens
+   the bubble. */
+.chat-md-table-wrap { margin: 6px 0; max-width: 100%; overflow-x: auto; }
+.chat-md table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.chat-md thead { font-family: var(--font-mono); color: var(--color-text-muted); }
+.chat-md th {
+  border: 1px solid var(--color-border);
+  padding: 4px 10px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.chat-md td {
+  border: 1px solid var(--color-border);
+  padding: 4px 10px;
+  vertical-align: top;
+}
+
+/* markdown images — clamp to the bubble; a huge screenshot must not blow the
+   column open horizontally. */
+.chat-md img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-sm);
+}
+
+/* tool-result image inside a chip — globals caps its HEIGHT (20rem) but not
+   its width; clamp it to the chip so a wide capture can't overflow. */
+.toolchip-img { max-width: 100%; }

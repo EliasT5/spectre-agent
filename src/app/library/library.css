@@ -53,6 +53,9 @@
   color: var(--color-text-muted);
   margin-top: 2px;
   opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Icon-only action buttons inside doc rows ──────────────────────────────── */
@@ -189,19 +192,25 @@
 }
 
 /* ── Lightbox overlay ──────────────────────────────────────────────────────── */
+/* Fixed overlays are contained by .dshell-main (its transform makes it the
+   containing block), so size the image against the lightbox's own box — vw/vh
+   would exceed the content column on desktop and cause horizontal scroll. */
 .lib-lightbox {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.88);
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   z-index: 50;
   padding: 24px;
+  overflow: hidden;
 }
 
 .lib-lightbox-img {
-  max-width: 92vw;
-  max-height: 88vh;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
   border-radius: 10px;
   box-shadow: 0 0 60px rgba(0, 0, 0, 0.5);
 }

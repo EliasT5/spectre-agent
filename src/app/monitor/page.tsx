@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { spectre, type MonitorEvent } from "@/lib/sdk";
+import { spectre, type MonitorEvent, type Connector } from "@/lib/sdk";
 import {
   TabShell,
   Panel,
@@ -45,10 +45,20 @@ const SEV_ROW_CLASS: Record<MonitorEvent["severity"], string> = {
   info: "",
 };
 
+/** Connector status → status-dot tone. */
+const CONN_TONE: Record<Connector["status"], Tone> = {
+  connected: "ok",
+  configured: "ok",
+  "needs-setup": "warn",
+  off: "off",
+  error: "crit",
+};
+
 export default function MonitorTab() {
   const [events, setEvents] = useState<MonitorEvent[] | null>(null);
   const [summary, setSummary] = useState({ warnings: 0, criticals: 0 });
   const [err, setErr] = useState("");
+  const [connectors, setConnectors] = useState<Connector[] | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -62,6 +72,10 @@ export default function MonitorTab() {
       } catch (e) {
         if (live) setErr(e instanceof Error ? e.message : "failed to load");
       }
+      try {
+        const cx = await spectre.connectors();
+        if (live) setConnectors(cx.connectors ?? []);
+      } catch { /* connectors are best-effort — don't blank the feed */ }
     };
     load();
     const t = setInterval(load, 10000);
@@ -162,6 +176,40 @@ export default function MonitorTab() {
                   {e.description}
                 </ListRow>
               </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      {/* Connectors — what's linked, no secrets shown */}
+      <Panel
+        label="connectors"
+        meta={connectors ? <span className="mono muted">{connectors.filter((x) => x.status === "connected").length}/{connectors.length} up</span> : undefined}
+      >
+        {connectors === null ? (
+          <div className="mon-skeleton-list">
+            <Skeleton height={40} />
+            <Skeleton height={40} />
+          </div>
+        ) : (
+          <div className="mon-connector-list">
+            {connectors.map((c) => (
+              <ListRow
+                key={c.name}
+                head={
+                  <span className="mon-row-head">
+                    <StatusDot tone={CONN_TONE[c.status]} />
+                    <Chip>{c.name}</Chip>
+                  </span>
+                }
+                when={
+                  <Chip color={c.status === "error" ? COLOR.critical : c.status === "needs-setup" ? COLOR.warning : undefined}>
+                    {c.status}
+                  </Chip>
+                }
+              >
+                {c.detail}
+              </ListRow>
             ))}
           </div>
         )}

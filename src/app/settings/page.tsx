@@ -14,6 +14,7 @@ import {
   Plus,
   CalendarDays,
   Terminal,
+  GitBranch,
 } from "lucide-react";
 import {
   getGlobalMode,
@@ -116,10 +117,13 @@ export default function SettingsTab() {
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
 
   // Microsoft 365 connection
-  const [ms, setMs] = useState<{ connected: boolean; user_email?: string | null; user_name?: string | null } | null>(null);
+  const [ms, setMs] = useState<{ connected: boolean; accounts?: Array<{ id: string; user_email?: string | null; user_name?: string | null }> } | null>(null);
   const [msNote, setMsNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [msLoading, setMsLoading] = useState(true);
-  const [msDisconnecting, setMsDisconnecting] = useState(false);
+  const [msDisconnecting, setMsDisconnecting] = useState("");
+  const [msBusy, setMsBusy] = useState(false);
+  const [msDevice, setMsDevice] = useState<{ userCode: string; verificationUri: string } | null>(null);
+  const [msAdvanced, setMsAdvanced] = useState(false);
 
   // Subscription CLIs (Claude/Codex/Gemini) — runtime enable, gated by the
   // core's SPECTRE_ALLOW_CLI_UI master flag.
@@ -128,6 +132,56 @@ export default function SettingsTab() {
   const [cliMsg, setCliMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [cliTokenDraft, setCliTokenDraft] = useState<Record<string, string>>({});
   const [cliBinDraft, setCliBinDraft] = useState<Record<string, string>>({});
+
+  // GitHub token (runtime, from Settings) — powers the Workspace clone/push flow.
+  const [ghHasToken, setGhHasToken] = useState(false);
+  const [ghDraft, setGhDraft] = useState("");
+  const [ghBusy, setGhBusy] = useState(false);
+  const [ghMsg, setGhMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [ghDevice, setGhDevice] = useState<{ userCode: string; verificationUri: string } | null>(null);
+
+  // Danger Zone toggles.
+  const [envAccess, setEnvAccess] = useState(false);
+  const [envBusy, setEnvBusy] = useState(false);
+  const [envMsg, setEnvMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // MS 365 app credentials (set in Settings, no .env).
+  const [msForm, setMsForm] = useState({ clientId: "", clientSecret: "", tenantId: "", redirectUri: "" });
+  const [msHasSecret, setMsHasSecret] = useState(false);
+  const [msHasCreds, setMsHasCreds] = useState(false);
+  const [msCredsBusy, setMsCredsBusy] = useState(false);
+  const [msCredsMsg, setMsCredsMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Google (calendar) — mirrors Microsoft: creds + a list of connected accounts.
+  const [google, setGoogle] = useState<{ connected: boolean; accounts?: Array<{ id: string; user_email?: string | null; user_name?: string | null }> } | null>(null);
+  const [googleLoading, setGoogleLoading] = useState(true);
+  const [googleDisconnecting, setGoogleDisconnecting] = useState("");
+  const [googleNote, setGoogleNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [googleForm, setGoogleForm] = useState({ clientId: "", clientSecret: "", redirectUri: "" });
+  const [googleHasSecret, setGoogleHasSecret] = useState(false);
+  const [googleHasCreds, setGoogleHasCreds] = useState(false);
+  const [googleCredsBusy, setGoogleCredsBusy] = useState(false);
+  const [googleCredsMsg, setGoogleCredsMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Web push (VAPID) keys.
+  const [vapidForm, setVapidForm] = useState({ subject: "", publicKey: "", privateKey: "" });
+  const [vapidHasKeys, setVapidHasKeys] = useState(false);
+  const [vapidBusy, setVapidBusy] = useState(false);
+  const [vapidMsg, setVapidMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Messaging channels (Telegram / WhatsApp / Discord).
+  const [ch, setCh] = useState({
+    telegram: { botToken: "", webhookSecret: "", allowedSenderIds: "" },
+    whatsapp: { token: "", phoneNumberId: "", verifyToken: "", appSecret: "", allowedSenderIds: "", graphVersion: "" },
+    discord: { botToken: "", allowedSenderIds: "" },
+  });
+  const [chStatus, setChStatus] = useState<{
+    telegram: { hasBotToken: boolean; hasWebhookSecret: boolean; allowedSenderIds: string };
+    whatsapp: { hasToken: boolean; phoneNumberId: string; hasVerifyToken: boolean; hasAppSecret: boolean; allowedSenderIds: string; graphVersion: string };
+    discord: { hasBotToken: boolean; allowedSenderIds: string };
+  } | null>(null);
+  const [chBusy, setChBusy] = useState("");
+  const [chMsg, setChMsg] = useState<{ ok: boolean; text: string; which: string } | null>(null);
 
   // Model backends (unified: api / cli-server / cli-command)
   const [bkKind, setBkKind] = useState<"api" | "cli-server" | "cli-command">("api");
@@ -151,6 +205,13 @@ export default function SettingsTab() {
   const [bkUiAllowed, setBkUiAllowed] = useState(true);
   const [bkRowBusy, setBkRowBusy] = useState<string | null>(null);
 
+  // Friendly "+ Add a CLI" — registers ANY command as a brain (a cli-command
+  // backend under the hood), so the CLI list isn't limited to the built-in 3.
+  const [addCliOpen, setAddCliOpen] = useState(false);
+  const [newCli, setNewCli] = useState({ label: "", command: "", args: "", envName: "", envValue: "" });
+  const [newCliBusy, setNewCliBusy] = useState(false);
+  const [newCliMsg, setNewCliMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
   // User-defined model display-name overrides (Models → rename)
   const [modelLabels, setModelLabels] = useState<Record<string, string>>({});
   const [nameDraft, setNameDraft] = useState<Record<string, string>>({});
@@ -168,14 +229,131 @@ export default function SettingsTab() {
     }
   }
 
-  async function disconnectMs() {
-    setMsDisconnecting(true);
+  async function disconnectMs(id: string) {
+    setMsDisconnecting(id);
     try {
-      await fetch("/api/auth/ms-graph/disconnect", { method: "POST" }).catch(() => {});
+      await fetch("/api/auth/ms-graph/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      }).catch(() => {});
       setMsNote(null);
       await loadMs();
     } finally {
-      setMsDisconnecting(false);
+      setMsDisconnecting("");
+    }
+  }
+
+  // One-click sign-in via Microsoft device code: start it, show the code, poll
+  // until approved, then the account lands in the list.
+  async function startMsLogin() {
+    setMsBusy(true);
+    setMsNote(null);
+    setMsDevice(null);
+    try {
+      const r = await fetch("/api/auth/ms-graph/device/start", { method: "POST" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMsNote({ ok: false, text: (j as { error?: string }).error || "Couldn't start Microsoft sign-in." });
+        setMsBusy(false);
+        return;
+      }
+      const { sessionId, userCode, verificationUri, interval } = j as {
+        sessionId: string; userCode: string; verificationUri: string; interval: number;
+      };
+      setMsDevice({ userCode, verificationUri });
+      window.open(verificationUri, "_blank", "noopener");
+      const delay = Math.max(3, interval || 5) * 1000;
+      const poll = async () => {
+        try {
+          const pr = await fetch("/api/auth/ms-graph/device/poll", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId }),
+          });
+          const pj = (await pr.json().catch(() => ({}))) as { status?: string; error?: string; email?: string };
+          if (pj.status === "authorized") {
+            setMsDevice(null);
+            setMsBusy(false);
+            setMsNote({ ok: true, text: pj.email ? `Connected ${pj.email}.` : "Microsoft connected." });
+            await loadMs();
+            return;
+          }
+          if (pj.status === "pending") { setTimeout(() => void poll(), delay); return; }
+          setMsDevice(null);
+          setMsBusy(false);
+          setMsNote({ ok: false, text: pj.error ? `Microsoft sign-in failed: ${pj.error}` : "Sign-in expired — try again." });
+        } catch (e) {
+          setMsDevice(null);
+          setMsBusy(false);
+          setMsNote({ ok: false, text: e instanceof Error ? e.message : "Microsoft sign-in failed." });
+        }
+      };
+      setTimeout(() => void poll(), delay);
+    } catch (e) {
+      setMsNote({ ok: false, text: e instanceof Error ? e.message : "Microsoft sign-in failed." });
+      setMsBusy(false);
+    }
+  }
+
+  async function loadGoogle() {
+    setGoogleLoading(true);
+    try {
+      const r = await fetch("/api/auth/google/status");
+      if (r.ok) setGoogle(await r.json());
+      else setGoogle({ connected: false });
+    } catch {
+      setGoogle({ connected: false });
+    } finally {
+      setGoogleLoading(false);
+    }
+  }
+
+  async function disconnectGoogle(id: string) {
+    setGoogleDisconnecting(id);
+    try {
+      await fetch("/api/auth/google/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      }).catch(() => {});
+      setGoogleNote(null);
+      await loadGoogle();
+    } finally {
+      setGoogleDisconnecting("");
+    }
+  }
+
+  async function loadGoogleCreds() {
+    try {
+      const r = await fetch("/api/auth/google/creds");
+      if (r.ok) {
+        const j = (await r.json()) as { clientId?: string; redirectUri?: string; hasSecret?: boolean; hasCreds?: boolean };
+        const defaultRedirect = typeof window !== "undefined" ? `${window.location.origin}/api/auth/google/callback` : "";
+        setGoogleForm((f) => ({ ...f, clientId: j.clientId || "", redirectUri: j.redirectUri || defaultRedirect, clientSecret: "" }));
+        setGoogleHasSecret(!!j.hasSecret);
+        setGoogleHasCreds(!!j.hasCreds);
+      }
+    } catch { /* fail-soft */ }
+  }
+  async function saveGoogleCreds() {
+    setGoogleCredsBusy(true);
+    setGoogleCredsMsg(null);
+    try {
+      const r = await fetch("/api/auth/google/creds", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(googleForm) });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setGoogleHasSecret(!!(j as { hasSecret?: boolean }).hasSecret);
+        setGoogleHasCreds(!!(j as { hasCreds?: boolean }).hasCreds);
+        setGoogleForm((f) => ({ ...f, clientSecret: "" }));
+        setGoogleCredsMsg({ ok: true, text: "Saved." });
+      } else {
+        setGoogleCredsMsg({ ok: false, text: (j as { error?: string }).error || `Failed (HTTP ${r.status}).` });
+      }
+    } catch (e) {
+      setGoogleCredsMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setGoogleCredsBusy(false);
     }
   }
 
@@ -217,6 +395,246 @@ export default function SettingsTab() {
       setCliMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
     } finally {
       setCliBusy(null);
+    }
+  }
+
+  async function loadGithub() {
+    try {
+      const r = await fetch("/api/providers/github");
+      if (r.ok) { const j = await r.json(); setGhHasToken(!!(j as { hasToken?: boolean }).hasToken); }
+    } catch { /* fail-soft */ }
+  }
+
+  async function saveGithubToken(token: string) {
+    setGhBusy(true);
+    setGhMsg(null);
+    try {
+      const r = await fetch("/api/providers/github/token", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setGhHasToken(!!(j as { hasToken?: boolean }).hasToken);
+        setGhDraft("");
+        setGhMsg({ ok: true, text: token.trim() ? "Token saved." : "Token cleared." });
+      } else {
+        setGhMsg({ ok: false, text: (j as { error?: string }).error || `Failed (HTTP ${r.status}).` });
+      }
+    } catch (e) {
+      setGhMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setGhBusy(false);
+    }
+  }
+
+  // "Just login" — GitHub OAuth device flow. Start it, show the code, then poll
+  // until the user authorizes on github.com; the core stores the granted token.
+  async function startGithubLogin() {
+    setGhBusy(true);
+    setGhMsg(null);
+    setGhDevice(null);
+    try {
+      const r = await fetch("/api/providers/github/device/start", { method: "POST" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setGhMsg({ ok: false, text: (j as { error?: string }).error || "Couldn't start GitHub login." });
+        setGhBusy(false);
+        return;
+      }
+      const { sessionId, userCode, verificationUri, interval } = j as {
+        sessionId: string; userCode: string; verificationUri: string; interval: number;
+      };
+      setGhDevice({ userCode, verificationUri });
+      window.open(verificationUri, "_blank", "noopener");
+      const delay = Math.max(3, interval || 5) * 1000;
+      const poll = async () => {
+        try {
+          const pr = await fetch("/api/providers/github/device/poll", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId }),
+          });
+          const pj = (await pr.json().catch(() => ({}))) as { status?: string; error?: string };
+          if (pj.status === "authorized") {
+            setGhHasToken(true);
+            setGhDevice(null);
+            setGhBusy(false);
+            setGhMsg({ ok: true, text: "Signed in to GitHub." });
+            return;
+          }
+          if (pj.status === "pending") { setTimeout(() => void poll(), delay); return; }
+          setGhDevice(null);
+          setGhBusy(false);
+          setGhMsg({ ok: false, text: pj.error ? `GitHub login failed: ${pj.error}` : "GitHub login expired — try again." });
+        } catch (e) {
+          setGhDevice(null);
+          setGhBusy(false);
+          setGhMsg({ ok: false, text: e instanceof Error ? e.message : "GitHub login failed." });
+        }
+      };
+      setTimeout(() => void poll(), delay);
+    } catch (e) {
+      setGhMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+      setGhBusy(false);
+    }
+  }
+
+  async function loadDanger() {
+    try {
+      const r = await fetch("/api/danger");
+      if (r.ok) { const j = await r.json(); setEnvAccess(!!(j as { allowEnvAccess?: boolean }).allowEnvAccess); }
+    } catch { /* fail-soft */ }
+  }
+
+  async function toggleEnvAccess() {
+    const next = !envAccess;
+    setEnvBusy(true);
+    setEnvMsg(null);
+    try {
+      const r = await fetch("/api/danger", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allowEnvAccess: next }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setEnvAccess(!!(j as { allowEnvAccess?: boolean }).allowEnvAccess);
+        setEnvMsg({ ok: true, text: next ? "Agent .env access ALLOWED." : "Agent .env access blocked." });
+      } else {
+        setEnvMsg({ ok: false, text: (j as { error?: string }).error || `Failed (HTTP ${r.status}).` });
+      }
+    } catch (e) {
+      setEnvMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setEnvBusy(false);
+    }
+  }
+
+  async function loadMsCreds() {
+    try {
+      const r = await fetch("/api/auth/ms-graph/creds");
+      if (r.ok) {
+        const j = (await r.json()) as { clientId?: string; tenantId?: string; redirectUri?: string; hasSecret?: boolean; hasCreds?: boolean };
+        const defaultRedirect = typeof window !== "undefined" ? `${window.location.origin}/api/auth/ms-graph/callback` : "";
+        setMsForm((f) => ({ ...f, clientId: j.clientId || "", tenantId: j.tenantId || "", redirectUri: j.redirectUri || defaultRedirect, clientSecret: "" }));
+        setMsHasSecret(!!j.hasSecret);
+        setMsHasCreds(!!j.hasCreds);
+      }
+    } catch { /* fail-soft */ }
+  }
+  async function saveMsCreds() {
+    setMsCredsBusy(true);
+    setMsCredsMsg(null);
+    try {
+      const r = await fetch("/api/auth/ms-graph/creds", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msForm) });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setMsHasSecret(!!(j as { hasSecret?: boolean }).hasSecret);
+        setMsHasCreds(!!(j as { hasCreds?: boolean }).hasCreds);
+        setMsForm((f) => ({ ...f, clientSecret: "" }));
+        setMsCredsMsg({ ok: true, text: "Saved." });
+      } else {
+        setMsCredsMsg({ ok: false, text: (j as { error?: string }).error || `Failed (HTTP ${r.status}).` });
+      }
+    } catch (e) {
+      setMsCredsMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setMsCredsBusy(false);
+    }
+  }
+
+  async function loadVapid() {
+    try {
+      const r = await fetch("/api/providers/vapid");
+      if (r.ok) {
+        const j = (await r.json()) as { hasKeys?: boolean; subject?: string; publicKey?: string };
+        setVapidForm((f) => ({ ...f, subject: j.subject || "", publicKey: j.publicKey || "", privateKey: "" }));
+        setVapidHasKeys(!!j.hasKeys);
+      }
+    } catch { /* fail-soft */ }
+  }
+  async function saveVapid() {
+    setVapidBusy(true);
+    setVapidMsg(null);
+    try {
+      const r = await fetch("/api/providers/vapid", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(vapidForm) });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setVapidHasKeys(!!(j as { hasKeys?: boolean }).hasKeys);
+        setVapidForm((f) => ({ ...f, privateKey: "" }));
+        setVapidMsg({ ok: true, text: "Saved." });
+      } else {
+        setVapidMsg({ ok: false, text: (j as { error?: string }).error || `Failed (HTTP ${r.status}).` });
+      }
+    } catch (e) {
+      setVapidMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setVapidBusy(false);
+    }
+  }
+  async function genVapid() {
+    setVapidBusy(true);
+    setVapidMsg(null);
+    try {
+      const r = await fetch("/api/providers/vapid/generate", { method: "POST" });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setVapidHasKeys(!!(j as { hasKeys?: boolean }).hasKeys);
+        setVapidForm((f) => ({ ...f, publicKey: (j as { publicKey?: string }).publicKey || f.publicKey, privateKey: "" }));
+        setVapidMsg({ ok: true, text: "New keys made. Add a subject and Save." });
+      } else {
+        setVapidMsg({ ok: false, text: (j as { error?: string }).error || `Failed (HTTP ${r.status}).` });
+      }
+    } catch (e) {
+      setVapidMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setVapidBusy(false);
+    }
+  }
+
+  async function loadChannels() {
+    try {
+      const r = await fetch("/api/providers/channels");
+      if (r.ok) {
+        const j = await r.json();
+        setChStatus(j);
+        setCh((c) => ({
+          telegram: { ...c.telegram, allowedSenderIds: j.telegram?.allowedSenderIds || "" },
+          whatsapp: { ...c.whatsapp, phoneNumberId: j.whatsapp?.phoneNumberId || "", allowedSenderIds: j.whatsapp?.allowedSenderIds || "", graphVersion: j.whatsapp?.graphVersion || "" },
+          discord: { ...c.discord, allowedSenderIds: j.discord?.allowedSenderIds || "" },
+        }));
+      }
+    } catch { /* fail-soft */ }
+  }
+  async function saveChannel(which: "telegram" | "whatsapp" | "discord") {
+    setChBusy(which);
+    setChMsg(null);
+    try {
+      const r = await fetch("/api/providers/channels", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [which]: ch[which] }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setChStatus(j);
+        setCh((c) => {
+          const next = { ...c };
+          if (which === "telegram") next.telegram = { ...c.telegram, botToken: "", webhookSecret: "" };
+          if (which === "whatsapp") next.whatsapp = { ...c.whatsapp, token: "", verifyToken: "", appSecret: "" };
+          if (which === "discord") next.discord = { ...c.discord, botToken: "" };
+          return next;
+        });
+        setChMsg({ ok: true, text: "Saved. Applies within ~10s.", which });
+      } else {
+        setChMsg({ ok: false, text: (j as { error?: string }).error || `Failed (HTTP ${r.status}).`, which });
+      }
+    } catch (e) {
+      setChMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed.", which });
+    } finally {
+      setChBusy("");
     }
   }
 
@@ -352,6 +770,52 @@ export default function SettingsTab() {
     }
   }
 
+  async function addCustomCli() {
+    const label = newCli.label.trim();
+    const command = newCli.command.trim();
+    if (!label || !command) { setNewCliMsg({ ok: false, text: "Name and command are both required." }); return; }
+    const id = (label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "custom-cli") + "-cli";
+    const args = newCli.args.trim() ? newCli.args.trim().split(/\s+/) : [];
+    const env: Record<string, string> = {};
+    if (newCli.envName.trim() && newCli.envValue.trim()) env[newCli.envName.trim()] = newCli.envValue.trim();
+    const body: Record<string, unknown> = {
+      schemaVersion: 1,
+      id,
+      label,
+      kind: "cli-command",
+      command,
+      args,
+      promptMode: "stdin",
+      outputMode: "stdout",
+      roles: { brain: true, dispatch: true },
+    };
+    if (Object.keys(env).length) body.env = env;
+    setNewCliBusy(true);
+    setNewCliMsg(null);
+    try {
+      const res = await fetch("/api/providers/backends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: unknown };
+      if (res.ok && j.ok !== false) {
+        setNewCliMsg({ ok: true, text: `Added "${label}" — it's now in the model picker.` });
+        setNewCli({ label: "", command: "", args: "", envName: "", envValue: "" });
+        setAddCliOpen(false);
+        await loadBackends();
+        await loadModels();
+      } else {
+        const detail = j.detail ? ` — ${typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail)}` : "";
+        setNewCliMsg({ ok: false, text: `${j.error || `Failed (HTTP ${res.status}).`}${detail}` });
+      }
+    } catch (e) {
+      setNewCliMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setNewCliBusy(false);
+    }
+  }
+
   async function toggleBackend(id: string, enabled: boolean) {
     setBkRowBusy(id);
     try {
@@ -453,6 +917,11 @@ export default function SettingsTab() {
 
   useEffect(() => {
     void loadCli();
+    void loadGithub();
+    void loadDanger();
+    void loadMsCreds();
+    void loadVapid();
+    void loadChannels();
   }, []);
 
   useEffect(() => {
@@ -462,10 +931,14 @@ export default function SettingsTab() {
 
   useEffect(() => {
     void loadMs();
+    void loadGoogle();
+    void loadGoogleCreds();
     const q = new URLSearchParams(window.location.search);
     if (q.get("ms_connected")) setMsNote({ ok: true, text: "Microsoft 365 connected." });
     else if (q.get("ms_error")) setMsNote({ ok: false, text: q.get("ms_error") || "Connection failed." });
-    if (q.has("ms_connected") || q.has("ms_error")) {
+    if (q.get("google_connected")) setGoogleNote({ ok: true, text: "Google connected." });
+    else if (q.get("google_error")) setGoogleNote({ ok: false, text: q.get("google_error") || "Connection failed." });
+    if (q.has("ms_connected") || q.has("ms_error") || q.has("google_connected") || q.has("google_error")) {
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
@@ -845,7 +1318,7 @@ export default function SettingsTab() {
         {/* ══════════════════════════════════════════════════════
             SECTION: AUTONOMY
         ══════════════════════════════════════════════════════ */}
-        <div className="settings-section-label">Autonomy</div>
+        <div className="settings-section-label">Danger Zone</div>
 
         <div className="settings-card">
           <div className="glass-fresnel" aria-hidden />
@@ -876,6 +1349,40 @@ export default function SettingsTab() {
           </div>
         </div>
 
+        {/* Agent access to .env secrets */}
+        <div className="settings-card">
+          <div className="glass-fresnel" aria-hidden />
+          <div className="settings-card-head">
+            <span className="settings-icon-badge">
+              <ShieldCheck strokeWidth={1.6} />
+            </span>
+            <div className="settings-card-titles">
+              <span className="settings-card-eyebrow">SECRETS</span>
+              <h2 className="settings-card-title">Agent access to .env files</h2>
+            </div>
+            {envAccess && <SavedTag text="allowed ⚠" />}
+          </div>
+          <div className="settings-card-body">
+            <p className="settings-card-hint">
+              By default the agent can&apos;t read or edit{" "}
+              <span className="settings-inline-code">.env</span> files — they hold your
+              secrets. Turn this on only if you specifically need the agent to touch them.
+            </p>
+            <button
+              type="button"
+              className={`settings-btn ${envAccess ? "danger" : "accent"}`}
+              style={{ alignSelf: "flex-start" }}
+              onClick={() => void toggleEnvAccess()}
+              disabled={envBusy}
+            >
+              <ShieldCheck size={14} /> {envAccess ? "Block .env access" : "Allow .env access"}
+            </button>
+            {envMsg && (
+              <span className={`settings-form-msg ${envMsg.ok ? "ok" : "err"}`}>{envMsg.text}</span>
+            )}
+          </div>
+        </div>
+
         {/* ══════════════════════════════════════════════════════
             SECTION: INTEGRATIONS
         ══════════════════════════════════════════════════════ */}
@@ -892,16 +1399,13 @@ export default function SettingsTab() {
               <span className="settings-card-eyebrow">CALENDAR</span>
               <h2 className="settings-card-title">Microsoft 365</h2>
             </div>
-            {ms?.connected && <SavedTag text="connected ✓" />}
+            {ms?.connected && <SavedTag text={`${ms.accounts?.length ?? 1} connected ✓`} />}
           </div>
           <div className="settings-card-body">
             <p className="settings-card-hint">
-              Lets Spectre read your calendar (
-              <span className="settings-inline-code">calendar.today</span> /{" "}
-              <span className="settings-inline-code">calendar.upcoming</span>). Needs{" "}
-              <span className="settings-inline-code">MS_GRAPH_CLIENT_ID</span> /{" "}
-              <span className="settings-inline-code">SECRET</span> /{" "}
-              <span className="settings-inline-code">REDIRECT_URI</span> on the core.
+              Sign in with your Microsoft account to let Spectre read your calendar
+              and email — no setup needed, works with personal and work accounts.
+              Connect several to see them all together.
             </p>
 
             {msLoading ? (
@@ -909,33 +1413,48 @@ export default function SettingsTab() {
                 <span className="settings-spinner sm" />
                 Checking…
               </div>
-            ) : ms?.connected ? (
-              <div className="settings-row" style={{ borderTop: "none", paddingTop: 0 }}>
-                <div className="settings-row-text">
-                  <div className="settings-row-label">{ms.user_name || ms.user_email || "Connected account"}</div>
-                  {ms.user_email && (
-                    <div className="settings-row-hint">{ms.user_email}</div>
-                  )}
-                </div>
+            ) : (
+              <>
+                {(ms?.accounts ?? []).map((a) => (
+                  <div key={a.id} className="settings-row" style={{ borderTop: "none", paddingTop: 0 }}>
+                    <div className="settings-row-text">
+                      <div className="settings-row-label">{a.user_name || a.user_email || "Connected account"}</div>
+                      {a.user_email && <div className="settings-row-hint">{a.user_email}</div>}
+                    </div>
+                    <button
+                      type="button"
+                      className="settings-btn danger"
+                      disabled={msDisconnecting === a.id}
+                      onClick={() => void disconnectMs(a.id)}
+                    >
+                      {msDisconnecting === a.id ? <span className="settings-spinner sm" /> : <CalendarDays size={14} />}
+                      Disconnect
+                    </button>
+                  </div>
+                ))}
                 <button
                   type="button"
-                  className="settings-btn danger"
-                  disabled={msDisconnecting}
-                  onClick={disconnectMs}
+                  className="settings-btn accent"
+                  onClick={() => void startMsLogin()}
+                  disabled={msBusy}
                 >
-                  {msDisconnecting ? <span className="settings-spinner sm" /> : <CalendarDays size={14} />}
-                  Disconnect
+                  <CalendarDays size={14} />
+                  {msBusy ? "Waiting for Microsoft…" : (ms?.accounts?.length ?? 0) > 0 ? "Add another account" : "Sign in with Microsoft"}
                 </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="settings-btn accent"
-                onClick={() => { window.location.href = "/api/auth/ms-graph/login"; }}
-              >
-                <CalendarDays size={14} />
-                Connect Microsoft 365
-              </button>
+                {msDevice && (
+                  <div
+                    className="settings-card-hint"
+                    style={{ padding: "8px 16px", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, marginTop: 8 }}
+                  >
+                    Go to{" "}
+                    <a href={msDevice.verificationUri} target="_blank" rel="noreferrer" className="settings-inline-code">
+                      {msDevice.verificationUri.replace(/^https?:\/\//, "")}
+                    </a>{" "}
+                    and enter code{" "}
+                    <span className="settings-inline-code" style={{ fontSize: 15, letterSpacing: 2 }}>{msDevice.userCode}</span>
+                  </div>
+                )}
+              </>
             )}
 
             {msNote && (
@@ -946,6 +1465,436 @@ export default function SettingsTab() {
                 {msNote.text}
               </span>
             )}
+
+            <button
+              type="button"
+              onClick={() => setMsAdvanced((v) => !v)}
+              style={{ background: "none", border: "none", color: "rgba(255,255,255,0.5)", fontSize: 11, cursor: "pointer", padding: "10px 16px 0", textAlign: "left" }}
+            >
+              {msAdvanced ? "▴" : "▾"} Advanced — use your own Azure app instead
+            </button>
+            {msAdvanced && (
+              <>
+                <p className="settings-card-hint" style={{ opacity: 0.75, fontSize: 11 }}>
+                  Optional. Your own app registration (needs{" "}
+                  <span className="settings-inline-code">Calendars.Read</span> +{" "}
+                  <span className="settings-inline-code">Mail.Read</span>). Its Client ID
+                  is then used for sign-in too; a secret + redirect URI are only needed for
+                  the browser-redirect connect.
+                </p>
+                <div className="settings-cli-subrow">
+                  <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="text" placeholder="Client ID" value={msForm.clientId} onChange={(e) => setMsForm((f) => ({ ...f, clientId: e.target.value }))} spellCheck={false} />
+                  <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="password" autoComplete="off" placeholder={msHasSecret ? "Client secret — set (paste to replace)" : "Client secret"} value={msForm.clientSecret} onChange={(e) => setMsForm((f) => ({ ...f, clientSecret: e.target.value }))} spellCheck={false} />
+                </div>
+                <div className="settings-cli-subrow">
+                  <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="text" placeholder="Tenant ID (default: common)" value={msForm.tenantId} onChange={(e) => setMsForm((f) => ({ ...f, tenantId: e.target.value }))} spellCheck={false} />
+                  <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="text" placeholder="Redirect URI" value={msForm.redirectUri} onChange={(e) => setMsForm((f) => ({ ...f, redirectUri: e.target.value }))} spellCheck={false} />
+                </div>
+                <div className="settings-cli-subrow">
+                  <button type="button" className="settings-btn tap-press" style={{ height: 32 }} onClick={() => void saveMsCreds()} disabled={msCredsBusy}>Save credentials</button>
+                  {msHasCreds && <SavedTag text="credentials set ✓" />}
+                  {msHasCreds && (
+                    <button type="button" className="settings-btn" style={{ height: 32 }} onClick={() => { window.location.href = "/api/auth/ms-graph/login"; }}>Connect via redirect</button>
+                  )}
+                  {msCredsMsg && (
+                    <span className={`settings-form-msg ${msCredsMsg.ok ? "ok" : "err"}`}>{msCredsMsg.text}</span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Google (calendar) */}
+        <div className="settings-card">
+          <div className="glass-fresnel" aria-hidden />
+          <div className="settings-card-head">
+            <span className="settings-icon-badge">
+              <CalendarDays strokeWidth={1.6} />
+            </span>
+            <div className="settings-card-titles">
+              <span className="settings-card-eyebrow">CALENDAR</span>
+              <h2 className="settings-card-title">Google</h2>
+            </div>
+            {google?.connected && <SavedTag text={`${google.accounts?.length ?? 1} connected ✓`} />}
+          </div>
+          <div className="settings-card-body">
+            <p className="settings-card-hint">
+              Lets Spectre read your Google Calendar and Gmail. Create a Google Cloud
+              OAuth app (scopes <span className="settings-inline-code">calendar.readonly</span>{" "}
+              + <span className="settings-inline-code">gmail.readonly</span>), add its
+              redirect URI, then paste the credentials below and connect.
+            </p>
+
+            <div className="settings-cli-subrow">
+              <input
+                className="settings-input"
+                style={{ height: 32, fontSize: 12, flex: 1 }}
+                type="text"
+                placeholder="Client ID"
+                value={googleForm.clientId}
+                onChange={(e) => setGoogleForm((f) => ({ ...f, clientId: e.target.value }))}
+                spellCheck={false}
+              />
+              <input
+                className="settings-input"
+                style={{ height: 32, fontSize: 12, flex: 1 }}
+                type="password"
+                autoComplete="off"
+                placeholder={googleHasSecret ? "Client secret — set (paste to replace)" : "Client secret"}
+                value={googleForm.clientSecret}
+                onChange={(e) => setGoogleForm((f) => ({ ...f, clientSecret: e.target.value }))}
+                spellCheck={false}
+              />
+            </div>
+            <div className="settings-cli-subrow">
+              <input
+                className="settings-input"
+                style={{ height: 32, fontSize: 12, flex: 1 }}
+                type="text"
+                placeholder="Redirect URI"
+                value={googleForm.redirectUri}
+                onChange={(e) => setGoogleForm((f) => ({ ...f, redirectUri: e.target.value }))}
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="settings-btn tap-press"
+                style={{ height: 32 }}
+                onClick={() => void saveGoogleCreds()}
+                disabled={googleCredsBusy}
+              >
+                Save credentials
+              </button>
+            </div>
+            <div className="settings-cli-subrow">
+              {googleHasCreds && <SavedTag text="credentials set ✓" />}
+              {googleCredsMsg && (
+                <span className={`settings-form-msg ${googleCredsMsg.ok ? "ok" : "err"}`}>{googleCredsMsg.text}</span>
+              )}
+            </div>
+
+            {googleLoading ? (
+              <div className="settings-ms-loading">
+                <span className="settings-spinner sm" />
+                Checking…
+              </div>
+            ) : (
+              <>
+                {(google?.accounts ?? []).map((a) => (
+                  <div key={a.id} className="settings-row" style={{ borderTop: "none", paddingTop: 0 }}>
+                    <div className="settings-row-text">
+                      <div className="settings-row-label">{a.user_name || a.user_email || "Connected account"}</div>
+                      {a.user_email && <div className="settings-row-hint">{a.user_email}</div>}
+                    </div>
+                    <button
+                      type="button"
+                      className="settings-btn danger"
+                      disabled={googleDisconnecting === a.id}
+                      onClick={() => void disconnectGoogle(a.id)}
+                    >
+                      {googleDisconnecting === a.id ? <span className="settings-spinner sm" /> : <CalendarDays size={14} />}
+                      Disconnect
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="settings-btn accent"
+                  disabled={!googleHasCreds}
+                  title={googleHasCreds ? "" : "Save your app credentials first"}
+                  onClick={() => { window.location.href = "/api/auth/google/login"; }}
+                >
+                  <CalendarDays size={14} />
+                  {(google?.accounts?.length ?? 0) > 0 ? "Add another account" : "Connect Google"}
+                </button>
+              </>
+            )}
+
+            {googleNote && (
+              <span
+                className="settings-ms-note"
+                style={{ color: googleNote.ok ? "var(--color-accent-hover)" : "var(--color-error)" }}
+              >
+                {googleNote.text}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* GitHub */}
+        <div className="settings-card">
+          <div className="glass-fresnel" aria-hidden />
+          <div className="settings-card-head">
+            <span className="settings-icon-badge">
+              <GitBranch strokeWidth={1.6} />
+            </span>
+            <div className="settings-card-titles">
+              <span className="settings-card-eyebrow">GIT</span>
+              <h2 className="settings-card-title">GitHub</h2>
+            </div>
+            {ghHasToken && <SavedTag text="connected ✓" />}
+          </div>
+          <div className="settings-card-body">
+            <p className="settings-card-hint">
+              Lets Workspaces clone repos (OPEN REPO) and push / open PRs. Use a
+              fine-grained token with{" "}
+              <span className="settings-inline-code">Contents: read &amp; write</span>, or a
+              classic token with <span className="settings-inline-code">repo</span> scope.
+              Stored on the core, never shown again.
+            </p>
+
+            {ghHasToken ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ color: "#4ade80", fontFamily: "var(--font-mono)", fontSize: 12 }}>✓ Signed in to GitHub</span>
+                <button
+                  type="button"
+                  className="settings-btn danger"
+                  style={{ height: 30, fontSize: 11, padding: "0 12px" }}
+                  onClick={() => void saveGithubToken("")}
+                  disabled={ghBusy}
+                  title="Remove the stored token"
+                >
+                  Log out
+                </button>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="settings-btn accent"
+                    style={{ alignSelf: "flex-start" }}
+                    onClick={() => void startGithubLogin()}
+                    disabled={ghBusy}
+                  >
+                    <GitBranch size={14} /> {ghDevice ? "Waiting for GitHub…" : "Login with GitHub"}
+                  </button>
+                  {ghDevice && (
+                    <p className="settings-card-hint" style={{ margin: 0 }}>
+                      Enter code{" "}
+                      <span className="settings-inline-code" style={{ fontSize: 15, letterSpacing: 2 }}>{ghDevice.userCode}</span>{" "}
+                      at{" "}
+                      <a href={ghDevice.verificationUri} target="_blank" rel="noreferrer" className="settings-inline-code">
+                        {ghDevice.verificationUri.replace(/^https?:\/\//, "")}
+                      </a>{" "}
+                      (opened in a new tab), then come back — it&apos;ll sign in automatically.
+                    </p>
+                  )}
+                </div>
+
+                <p className="settings-card-hint" style={{ margin: 0, opacity: 0.7, fontSize: 11 }}>or paste a token manually:</p>
+                <div className="settings-cli-subrow">
+                  <input
+                    className="settings-input"
+                    style={{ height: 32, fontSize: 12, flex: 1 }}
+                    type="password"
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder="Paste a GitHub token (ghp_… / github_pat_…)"
+                    value={ghDraft}
+                    onChange={(e) => setGhDraft(e.target.value)}
+                    aria-label="GitHub token"
+                  />
+                  <button
+                    type="button"
+                    className="settings-btn tap-press"
+                    style={{ height: 32 }}
+                    onClick={() => void saveGithubToken(ghDraft)}
+                    disabled={ghBusy || !ghDraft.trim()}
+                  >
+                    Save token
+                  </button>
+                </div>
+              </>
+            )}
+            {ghMsg && (
+              <span className={`settings-form-msg ${ghMsg.ok ? "ok" : "err"}`}>{ghMsg.text}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Web push (VAPID) */}
+        <div className="settings-card">
+          <div className="glass-fresnel" aria-hidden />
+          <div className="settings-card-head">
+            <span className="settings-icon-badge">
+              <ShieldCheck strokeWidth={1.6} />
+            </span>
+            <div className="settings-card-titles">
+              <span className="settings-card-eyebrow">NOTIFICATIONS</span>
+              <h2 className="settings-card-title">Web push</h2>
+            </div>
+            {vapidHasKeys && <SavedTag text="keys set ✓" />}
+          </div>
+          <div className="settings-card-body">
+            <p className="settings-card-hint">
+              Push alerts to your devices. Click Generate keys, add a subject (a{" "}
+              <span className="settings-inline-code">mailto:</span> address or URL),
+              then Save. Making new keys forces devices to subscribe again.
+            </p>
+
+            <div className="settings-cli-subrow">
+              <button
+                type="button"
+                className="settings-btn accent"
+                style={{ height: 32 }}
+                onClick={() => void genVapid()}
+                disabled={vapidBusy}
+              >
+                Generate keys
+              </button>
+              {vapidHasKeys && (
+                <span className="mono muted" style={{ fontSize: 11 }}>
+                  public key set
+                </span>
+              )}
+            </div>
+            <div className="settings-cli-subrow">
+              <input
+                className="settings-input"
+                style={{ height: 32, fontSize: 12, flex: 1 }}
+                type="text"
+                placeholder="Subject (mailto:you@example.com)"
+                value={vapidForm.subject}
+                onChange={(e) => setVapidForm((f) => ({ ...f, subject: e.target.value }))}
+                spellCheck={false}
+              />
+            </div>
+            <div className="settings-cli-subrow">
+              <input
+                className="settings-input"
+                style={{ height: 32, fontSize: 12, flex: 1 }}
+                type="text"
+                placeholder="Public key (or use Generate)"
+                value={vapidForm.publicKey}
+                onChange={(e) => setVapidForm((f) => ({ ...f, publicKey: e.target.value }))}
+                spellCheck={false}
+              />
+            </div>
+            <div className="settings-cli-subrow">
+              <input
+                className="settings-input"
+                style={{ height: 32, fontSize: 12, flex: 1 }}
+                type="password"
+                autoComplete="off"
+                placeholder={vapidHasKeys ? "Private key — set (paste to replace)" : "Private key (or use Generate)"}
+                value={vapidForm.privateKey}
+                onChange={(e) => setVapidForm((f) => ({ ...f, privateKey: e.target.value }))}
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="settings-btn tap-press"
+                style={{ height: 32 }}
+                onClick={() => void saveVapid()}
+                disabled={vapidBusy}
+              >
+                Save
+              </button>
+            </div>
+            {vapidMsg && (
+              <span className={`settings-form-msg ${vapidMsg.ok ? "ok" : "err"}`}>{vapidMsg.text}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Messaging channels (Telegram / WhatsApp / Discord) */}
+        <div className="settings-card">
+          <div className="glass-fresnel" aria-hidden />
+          <div className="settings-card-head">
+            <span className="settings-icon-badge">
+              <AppWindow strokeWidth={1.6} />
+            </span>
+            <div className="settings-card-titles">
+              <span className="settings-card-eyebrow">MESSAGING</span>
+              <h2 className="settings-card-title">Channels</h2>
+            </div>
+          </div>
+          <div className="settings-card-body">
+            <p className="settings-card-hint">
+              Let people chat with Spectre from Telegram, WhatsApp, or Discord. Paste
+              each bot&apos;s tokens, then list the sender IDs allowed to talk to it
+              (comma-separated — empty means nobody). Changes apply within ~10s; no
+              restart needed.
+            </p>
+
+            {/* Telegram */}
+            <div className="settings-channel-block">
+              <div className="settings-channel-head">
+                <strong>Telegram</strong>
+                {chStatus?.telegram.hasBotToken && <SavedTag text="token set ✓" />}
+              </div>
+              <div className="settings-cli-subrow">
+                <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="password" autoComplete="off"
+                  placeholder={chStatus?.telegram.hasBotToken ? "Bot token — set (paste to replace)" : "Bot token"}
+                  value={ch.telegram.botToken} onChange={(e) => setCh((c) => ({ ...c, telegram: { ...c.telegram, botToken: e.target.value } }))} spellCheck={false} />
+                <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="password" autoComplete="off"
+                  placeholder={chStatus?.telegram.hasWebhookSecret ? "Webhook secret — set" : "Webhook secret"}
+                  value={ch.telegram.webhookSecret} onChange={(e) => setCh((c) => ({ ...c, telegram: { ...c.telegram, webhookSecret: e.target.value } }))} spellCheck={false} />
+              </div>
+              <div className="settings-cli-subrow">
+                <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="text"
+                  placeholder="Allowed sender IDs (comma-separated)"
+                  value={ch.telegram.allowedSenderIds} onChange={(e) => setCh((c) => ({ ...c, telegram: { ...c.telegram, allowedSenderIds: e.target.value } }))} spellCheck={false} />
+                <button type="button" className="settings-btn tap-press" style={{ height: 32 }} onClick={() => void saveChannel("telegram")} disabled={chBusy === "telegram"}>Save</button>
+              </div>
+              {chMsg?.which === "telegram" && <span className={`settings-form-msg ${chMsg.ok ? "ok" : "err"}`}>{chMsg.text}</span>}
+            </div>
+
+            {/* WhatsApp */}
+            <div className="settings-channel-block">
+              <div className="settings-channel-head">
+                <strong>WhatsApp</strong>
+                {chStatus?.whatsapp.hasToken && <SavedTag text="token set ✓" />}
+              </div>
+              <div className="settings-cli-subrow">
+                <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="password" autoComplete="off"
+                  placeholder={chStatus?.whatsapp.hasToken ? "Access token — set (paste to replace)" : "Access token"}
+                  value={ch.whatsapp.token} onChange={(e) => setCh((c) => ({ ...c, whatsapp: { ...c.whatsapp, token: e.target.value } }))} spellCheck={false} />
+                <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="text"
+                  placeholder="Phone number ID"
+                  value={ch.whatsapp.phoneNumberId} onChange={(e) => setCh((c) => ({ ...c, whatsapp: { ...c.whatsapp, phoneNumberId: e.target.value } }))} spellCheck={false} />
+              </div>
+              <div className="settings-cli-subrow">
+                <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="password" autoComplete="off"
+                  placeholder={chStatus?.whatsapp.hasVerifyToken ? "Verify token — set" : "Verify token"}
+                  value={ch.whatsapp.verifyToken} onChange={(e) => setCh((c) => ({ ...c, whatsapp: { ...c.whatsapp, verifyToken: e.target.value } }))} spellCheck={false} />
+                <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="password" autoComplete="off"
+                  placeholder={chStatus?.whatsapp.hasAppSecret ? "App secret — set" : "App secret"}
+                  value={ch.whatsapp.appSecret} onChange={(e) => setCh((c) => ({ ...c, whatsapp: { ...c.whatsapp, appSecret: e.target.value } }))} spellCheck={false} />
+              </div>
+              <div className="settings-cli-subrow">
+                <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 2 }} type="text"
+                  placeholder="Allowed sender IDs (comma-separated)"
+                  value={ch.whatsapp.allowedSenderIds} onChange={(e) => setCh((c) => ({ ...c, whatsapp: { ...c.whatsapp, allowedSenderIds: e.target.value } }))} spellCheck={false} />
+                <input className="settings-input" style={{ height: 32, fontSize: 12, width: 110 }} type="text"
+                  placeholder="Graph ver"
+                  value={ch.whatsapp.graphVersion} onChange={(e) => setCh((c) => ({ ...c, whatsapp: { ...c.whatsapp, graphVersion: e.target.value } }))} spellCheck={false} />
+                <button type="button" className="settings-btn tap-press" style={{ height: 32 }} onClick={() => void saveChannel("whatsapp")} disabled={chBusy === "whatsapp"}>Save</button>
+              </div>
+              {chMsg?.which === "whatsapp" && <span className={`settings-form-msg ${chMsg.ok ? "ok" : "err"}`}>{chMsg.text}</span>}
+            </div>
+
+            {/* Discord */}
+            <div className="settings-channel-block">
+              <div className="settings-channel-head">
+                <strong>Discord</strong>
+                {chStatus?.discord.hasBotToken && <SavedTag text="token set ✓" />}
+              </div>
+              <div className="settings-cli-subrow">
+                <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="password" autoComplete="off"
+                  placeholder={chStatus?.discord.hasBotToken ? "Bot token — set (paste to replace)" : "Bot token"}
+                  value={ch.discord.botToken} onChange={(e) => setCh((c) => ({ ...c, discord: { ...c.discord, botToken: e.target.value } }))} spellCheck={false} />
+              </div>
+              <div className="settings-cli-subrow">
+                <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="text"
+                  placeholder="Allowed sender IDs (comma-separated)"
+                  value={ch.discord.allowedSenderIds} onChange={(e) => setCh((c) => ({ ...c, discord: { ...c.discord, allowedSenderIds: e.target.value } }))} spellCheck={false} />
+                <button type="button" className="settings-btn tap-press" style={{ height: 32 }} onClick={() => void saveChannel("discord")} disabled={chBusy === "discord"}>Save</button>
+              </div>
+              {chMsg?.which === "discord" && <span className={`settings-form-msg ${chMsg.ok ? "ok" : "err"}`}>{chMsg.text}</span>}
+            </div>
           </div>
         </div>
 
@@ -1197,6 +2146,23 @@ export default function SettingsTab() {
                         </div>
                         {it.canManage && (
                           <>
+                            {/* Guided per-CLI setup: install status + how to authenticate. */}
+                            <p className="settings-card-hint" style={{ padding: "0 16px 6px", fontSize: 11, opacity: 0.85 }}>
+                              {!it.binaryOnPath && !it.hasBin && (
+                                <>⚠ Not installed in the core image — rebuild with{" "}
+                                <span className="settings-inline-code">INSTALL_CLIS=1</span>, or set a binary path below.{" "}</>
+                              )}
+                              {it.id === "claude-code" && (
+                                <>Auth: run <span className="settings-inline-code">claude setup-token</span> on your computer, then paste the token below.</>
+                              )}
+                              {it.id === "codex-cli" && (
+                                <>Auth: paste an OpenAI API key below (billed per use), or mount your{" "}
+                                <span className="settings-inline-code">~/.codex</span> login for ChatGPT-subscription auth.</>
+                              )}
+                              {it.id === "gemini-cli" && (
+                                <>Auth: paste a Google AI (Gemini) API key below.</>
+                              )}
+                            </p>
                             {/* Auth token — set the CLI's credential from here (no file edit). */}
                             <div className="settings-cli-subrow">
                               <input
@@ -1210,7 +2176,11 @@ export default function SettingsTab() {
                                     ? "Token set — paste a new one to replace"
                                     : it.id === "claude-code"
                                       ? "Paste token from `claude setup-token`"
-                                      : `Paste ${it.label} auth token`
+                                      : it.id === "codex-cli"
+                                        ? "Paste an OpenAI API key (sk-…)"
+                                        : it.id === "gemini-cli"
+                                          ? "Paste a Google AI (Gemini) API key"
+                                          : `Paste ${it.label} auth token`
                                 }
                                 value={cliTokenDraft[it.id] ?? ""}
                                 onChange={(e) => setCliTokenDraft((d) => ({ ...d, [it.id]: e.target.value }))}
@@ -1305,6 +2275,47 @@ export default function SettingsTab() {
             )}
             {cliMsg && (
               <span className={`settings-form-msg ${cliMsg.ok ? "ok" : "err"}`}>{cliMsg.text}</span>
+            )}
+
+            {/* Add ANY CLI as a brain — not limited to the built-in 3. Creates a
+                cli-command backend under the hood; shows up in the model picker. */}
+            {cli?.uiAllowed && (
+              <div style={{ marginTop: 14 }}>
+                {!addCliOpen ? (
+                  <button
+                    type="button"
+                    className="settings-btn tap-press"
+                    style={{ height: 30, fontSize: 12 }}
+                    onClick={() => { setAddCliOpen(true); setNewCliMsg(null); }}
+                  >
+                    <Plus size={13} /> Add another CLI
+                  </button>
+                ) : (
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 10 }}>
+                    <p className="settings-card-hint" style={{ fontSize: 11, opacity: 0.85, paddingLeft: 0 }}>
+                      Add any command as a brain (e.g. Grok, Qwen, a local script). The binary
+                      must be in the core image or on PATH — bundle it like Claude/Codex. Once
+                      added it appears in the model picker.
+                    </p>
+                    <div className="settings-cli-subrow" style={{ paddingLeft: 0 }}>
+                      <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="text" placeholder="Name (e.g. Grok)" value={newCli.label} onChange={(e) => setNewCli((c) => ({ ...c, label: e.target.value }))} spellCheck={false} />
+                      <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="text" placeholder="Command (e.g. grok)" value={newCli.command} onChange={(e) => setNewCli((c) => ({ ...c, command: e.target.value }))} spellCheck={false} />
+                    </div>
+                    <div className="settings-cli-subrow" style={{ paddingLeft: 0 }}>
+                      <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="text" placeholder="Args — optional, e.g. exec --model {model}" value={newCli.args} onChange={(e) => setNewCli((c) => ({ ...c, args: e.target.value }))} spellCheck={false} />
+                    </div>
+                    <div className="settings-cli-subrow" style={{ paddingLeft: 0 }}>
+                      <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="text" placeholder="Auth env var — optional, e.g. XAI_API_KEY" value={newCli.envName} onChange={(e) => setNewCli((c) => ({ ...c, envName: e.target.value }))} spellCheck={false} />
+                      <input className="settings-input" style={{ height: 32, fontSize: 12, flex: 1 }} type="password" autoComplete="off" placeholder="Auth value — optional" value={newCli.envValue} onChange={(e) => setNewCli((c) => ({ ...c, envValue: e.target.value }))} spellCheck={false} />
+                    </div>
+                    <div className="settings-cli-subrow" style={{ paddingLeft: 0 }}>
+                      <button type="button" className="settings-btn accent tap-press" style={{ height: 32 }} onClick={() => void addCustomCli()} disabled={newCliBusy}>Add CLI</button>
+                      <button type="button" className="settings-btn tap-press" style={{ height: 32 }} onClick={() => { setAddCliOpen(false); setNewCliMsg(null); }} disabled={newCliBusy}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+                {newCliMsg && <span className={`settings-form-msg ${newCliMsg.ok ? "ok" : "err"}`}>{newCliMsg.text}</span>}
+              </div>
             )}
           </div>
         </div>

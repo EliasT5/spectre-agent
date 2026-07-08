@@ -1,0 +1,10 @@
+{
+  "workbench.colorTheme": "Dark Modern",
+  "workbench.startupEditor": "none",
+  "workbench.tips.enabled": false,
+  "editor.fontSize": 13,
+  "editor.minimap.enabled": true,
+  "window.menuBarVisibility": "compact",
+  "telemetry.telemetryLevel": "off",
+  "update.mode": "none"
+}

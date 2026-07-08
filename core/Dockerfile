@@ -50,20 +50,22 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && git config --global --add safe.directory '*'
 
-# Optional: bundle the Claude Code CLI (a subscription "brain") INTO the image so
-# it works in the CONTAINERIZED core (the CLIs otherwise run from the host, which a
-# container can't reach). OFF by default — host-run cores don't need it. Enable:
-#   docker compose build --build-arg INSTALL_CLAUDE_CLI=1 core
-# Auth is a portable token: run `claude setup-token` on the host and put the value
-# in .env.docker as CLAUDE_CODE_OAUTH_TOKEN (it flows into the spawned CLI's env).
-ARG INSTALL_CLAUDE_CLI=0
-RUN if [ "$INSTALL_CLAUDE_CLI" = "1" ]; then \
+# Optional: bundle the subscription "brain" CLIs (Claude Code + Codex) INTO the
+# image so they work in the CONTAINERIZED core (the CLIs otherwise run from the
+# host, which a container can't reach). OFF by default — host-run cores don't need
+# it. Enable via .env.docker (INSTALL_CLIS=1) or:
+#   docker compose build --build-arg INSTALL_CLIS=1 core
+# Auth (all UI/env, no image rebuild): Claude → CLAUDE_CODE_OAUTH_TOKEN (from
+# `claude setup-token`, settable in Settings); Codex → an OpenAI API key in Settings
+# (OPENAI_API_KEY), or mount your host ~/.codex login for ChatGPT-subscription auth.
+ARG INSTALL_CLIS=0
+RUN if [ "$INSTALL_CLIS" = "1" ]; then \
       apt-get update \
       && apt-get install -y --no-install-recommends nodejs npm \
-      && npm install -g @anthropic-ai/claude-code \
+      && npm install -g @anthropic-ai/claude-code @openai/codex \
       && npm cache clean --force \
       && rm -rf /var/lib/apt/lists/* \
-      && claude --version; \
+      && claude --version && codex --version; \
     fi
 
 # The compiled binaries.
