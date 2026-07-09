@@ -1352,9 +1352,17 @@ export default function SettingsTab() {
         </div>
 
         {/* ══════════════════════════════════════════════════════
-            SECTION: AUTONOMY
+            SECTION: DANGER ZONE — wrapped + pushed to the bottom of the page
+            via CSS `order: 100` on .settings-danger-zone (settings-col is flex).
         ══════════════════════════════════════════════════════ */}
-        <div className="settings-section-label">Danger Zone</div>
+        <div className="settings-danger-zone">
+          <div className="settings-danger-banner">
+            <span aria-hidden style={{ fontSize: 18 }}>⚠</span>
+            <span>
+              <strong>Danger Zone</strong> — these settings affect security and can
+              break things. Only change them if you understand what they do.
+            </span>
+          </div>
 
         <div className="settings-card">
           <div className="glass-fresnel" aria-hidden />
@@ -1474,6 +1482,7 @@ export default function SettingsTab() {
             {ffMsg && <span className={`settings-form-msg ${ffMsg.ok ? "ok" : "err"}`}>{ffMsg.text}</span>}
           </div>
         </div>
+        </div>{/* /settings-danger-zone */}
 
         {/* ══════════════════════════════════════════════════════
             SECTION: INTEGRATIONS

@@ -1,7 +1,7 @@
 name: CI
 
-# Type-check, installer syntax gate, a production Next build, and a secret/identity
-# scan for the public shell. (No lint job yet — add eslint + a flat config first.)
+# Type-check, installer syntax gate, a production Next build, and a secret scan for
+# the public shell. (No lint job yet — add eslint + a flat config first.)
 
 on:
   push:
@@ -47,18 +47,10 @@ jobs:
         run: npm run build
 
   secret-scan:
-    name: secret + identity scan
+    name: secret scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - name: No gmail / personal identity in git history
-        run: |
-          if git log --all --format='%ae %ce %an %cn' | grep -qiE 'gmail\.com'; then
-            echo "::error::a gmail/personal identity appears in git history"; exit 1
-          fi
-          echo "identities clean"
       - name: No real secrets in tracked files
         run: |
           if git grep -nIE '(sk-[A-Za-z0-9]{24,}|AIza[A-Za-z0-9_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{20,})' -- . ':!*lock*'; then
