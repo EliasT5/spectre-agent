@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
 import { createServiceSupabase } from "@/lib/supabase/server";
+import { isCliUiAllowed } from "@/lib/feature-flags";
 
 /**
  * Runtime gate for the subscription-backed CLI providers (Claude Code / Codex /
@@ -19,8 +20,9 @@ import { createServiceSupabase } from "@/lib/supabase/server";
 export type CliId = "claude-code" | "codex-cli" | "gemini-cli";
 export const CLI_IDS: readonly CliId[] = ["claude-code", "codex-cli", "gemini-cli"];
 
-/** Operator master switch: may the Settings UI manage CLI providers at runtime? */
-export const CLI_UI_ALLOWED = process.env.SPECTRE_ALLOW_CLI_UI === "1";
+// "May the Settings UI manage CLI providers at runtime?" is now the runtime
+// feature flag isCliUiAllowed() (Settings -> Danger Zone; env SPECTRE_ALLOW_CLI_UI
+// fallback), imported above.
 
 interface CliMeta {
   label: string;
@@ -41,12 +43,12 @@ function envDefault(id: CliId): boolean {
   return process.env[META[id].envVar] === "1";
 }
 
-// Runtime overrides (id -> on/off). Only consulted when CLI_UI_ALLOWED.
+// Runtime overrides (id -> on/off). Only consulted when isCliUiAllowed().
 const override: Partial<Record<CliId, boolean>> = {};
 
 /** The effective gate — synchronous, safe to call in hot paths. */
 export function cliAllowed(id: CliId): boolean {
-  if (CLI_UI_ALLOWED && id in override) return override[id] === true;
+  if (isCliUiAllowed() && id in override) return override[id] === true;
   return envDefault(id);
 }
 
@@ -84,14 +86,14 @@ export interface CliGateRow {
 
 export function getCliGate(): { uiAllowed: boolean; items: CliGateRow[] } {
   return {
-    uiAllowed: CLI_UI_ALLOWED,
+    uiAllowed: isCliUiAllowed(),
     items: CLI_IDS.map((id) => ({
       id,
       label: META[id].label,
       enabled: cliAllowed(id),
       envDefault: envDefault(id),
       envVar: META[id].envVar,
-      canManage: CLI_UI_ALLOWED,
+      canManage: isCliUiAllowed(),
       hasToken: hasCliToken(id),
       hasBin: hasCliBin(id),
       bin: getCliBin(id),
@@ -102,7 +104,7 @@ export function getCliGate(): { uiAllowed: boolean; items: CliGateRow[] } {
 
 /** Set (or clear, when token is empty) a CLI's runtime auth token. UI-gated. */
 export async function setCliToken(id: CliId, token: string): Promise<void> {
-  if (!CLI_UI_ALLOWED) {
+  if (!isCliUiAllowed()) {
     throw new Error(
       "CLI management from the UI is disabled. Set SPECTRE_ALLOW_CLI_UI=1 on the core to enable it.",
     );
@@ -141,7 +143,7 @@ export function hasCliBin(id: CliId): boolean {
 
 /** Set (or clear) a CLI's binary command/path from the UI. UI-gated. */
 export async function setCliBin(id: CliId, pathOrCmd: string): Promise<void> {
-  if (!CLI_UI_ALLOWED) {
+  if (!isCliUiAllowed()) {
     throw new Error("CLI management from the UI is disabled. Set SPECTRE_ALLOW_CLI_UI=1 on the core.");
   }
   if (pathOrCmd && pathOrCmd.trim()) bins[id] = pathOrCmd.trim();
@@ -168,7 +170,7 @@ export function cliAdded(id: CliId): boolean {
 
 /** Flip a CLI at runtime. Throws (with a clear reason) when not permitted. */
 export async function setCliEnabled(id: CliId, on: boolean): Promise<void> {
-  if (!CLI_UI_ALLOWED) {
+  if (!isCliUiAllowed()) {
     throw new Error(
       "CLI management from the UI is disabled. Set SPECTRE_ALLOW_CLI_UI=1 on the core to enable it.",
     );
