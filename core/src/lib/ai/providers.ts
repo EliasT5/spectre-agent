@@ -18,7 +18,7 @@ import { cliAllowed } from "./cli-gate";
 import { streamOllama, isOllamaAvailable, quickCompleteOllama, listOllamaModels } from "./providers/ollama";
 import { streamJerome, isJeromeAvailable } from "./providers/jerome";
 import { streamCliText } from "./backends/cli-text-streamer";
-import { CLI_BACKENDS_ALLOWED } from "./backends/gate";
+import { isCliBackendsAllowed } from "./backends/gate";
 import { listBackendsSync } from "./backends/registry";
 
 export type { ChatMessage, StreamChunk, StreamOptions } from "./providers/types";
@@ -28,7 +28,7 @@ export type { ChatMessage, StreamChunk, StreamOptions } from "./providers/types"
 /** cli-text is available when the master flag is on AND an enabled cli-command brain exists. */
 function cliTextAvailable(): boolean {
   return (
-    CLI_BACKENDS_ALLOWED &&
+    isCliBackendsAllowed() &&
     listBackendsSync().some((b) => b.kind === "cli-command" && b.enabled && b.roles?.brain)
   );
 }

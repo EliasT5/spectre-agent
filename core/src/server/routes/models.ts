@@ -10,7 +10,7 @@ import { listLiteLLMModels } from "@/lib/ai/providers/litellm";
 import { listOllamaModels } from "@/lib/ai/providers/ollama";
 import { cliAllowed, hasCliToken } from "@/lib/ai/cli-gate";
 import { listBackendsSync } from "@/lib/ai/backends/registry";
-import { CLI_BACKENDS_ALLOWED } from "@/lib/ai/backends/gate";
+import { isCliBackendsAllowed } from "@/lib/ai/backends/gate";
 import { createServiceSupabase } from "@/lib/supabase/server";
 
 /** User-defined display-name overrides for the model picker: { "<model id>": "Name" }. */
@@ -392,7 +392,7 @@ models.get("/", async (c) => {
     if (b.kind !== "cli-command" || !b.roles?.brain) continue;
     if (seenIds.has(b.id)) continue;
     seenIds.add(b.id);
-    const avail = CLI_BACKENDS_ALLOWED && b.enabled;
+    const avail = isCliBackendsAllowed() && b.enabled;
     const entry: ModelEntry = {
       id: b.id,
       provider: "cli-text",
@@ -400,7 +400,7 @@ models.get("/", async (c) => {
       available: avail,
       detected: true,
     };
-    if (!CLI_BACKENDS_ALLOWED) entry.unavailableReason = "set SPECTRE_ALLOW_CLI_BACKENDS=1 on the core to enable CLI backends";
+    if (!isCliBackendsAllowed()) entry.unavailableReason = "enable custom CLI/command backends in Settings -> Danger Zone (or set SPECTRE_ALLOW_CLI_BACKENDS=1)";
     else if (!b.enabled) entry.unavailableReason = "backend is disabled — enable it in Settings → Providers";
     result.push(entry);
   }

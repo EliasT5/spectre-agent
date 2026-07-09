@@ -11,9 +11,12 @@
  */
 import { spawn } from "child_process";
 import type { BackendKind, ModelBackend } from "./schema";
+import { isCliBackendsAllowed } from "@/lib/feature-flags";
 
-/** Operator master switch: may cli-server / cli-command backends run at all? */
-export const CLI_BACKENDS_ALLOWED = process.env.SPECTRE_ALLOW_CLI_BACKENDS === "1";
+// Operator master switch: may cli-server / cli-command backends run at all? Now a
+// runtime feature flag (Settings -> Danger Zone) with an env fallback. Re-exported
+// for the callers that gate on it.
+export { isCliBackendsAllowed };
 
 /** Does this kind spawn an operator-supplied command (→ needs the master flag)? */
 export function kindSpawns(kind: BackendKind): boolean {
@@ -22,7 +25,7 @@ export function kindSpawns(kind: BackendKind): boolean {
 
 /** True when a backend of this kind is permitted to exist/run. */
 export function backendKindAllowed(kind: BackendKind): boolean {
-  return kindSpawns(kind) ? CLI_BACKENDS_ALLOWED : true;
+  return kindSpawns(kind) ? isCliBackendsAllowed() : true;
 }
 
 /** Throw (with a clear reason) when a spawning kind is used but the flag is off. */

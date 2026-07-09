@@ -144,6 +144,11 @@ export default function SettingsTab() {
   const [envAccess, setEnvAccess] = useState(false);
   const [envBusy, setEnvBusy] = useState(false);
   const [envMsg, setEnvMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // Runtime feature flags (also in the Danger Zone) — no .env edit needed.
+  const [cliUi, setCliUi] = useState(false);
+  const [cliBackends, setCliBackends] = useState(false);
+  const [ffBusy, setFfBusy] = useState("");
+  const [ffMsg, setFfMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // MS 365 app credentials (set in Settings, no .env).
   const [msForm, setMsForm] = useState({ clientId: "", clientSecret: "", tenantId: "", redirectUri: "" });
@@ -484,8 +489,39 @@ export default function SettingsTab() {
   async function loadDanger() {
     try {
       const r = await fetch("/api/danger");
-      if (r.ok) { const j = await r.json(); setEnvAccess(!!(j as { allowEnvAccess?: boolean }).allowEnvAccess); }
+      if (r.ok) {
+        const j = (await r.json()) as { allowEnvAccess?: boolean; cliUi?: boolean; cliBackends?: boolean };
+        setEnvAccess(!!j.allowEnvAccess);
+        setCliUi(!!j.cliUi);
+        setCliBackends(!!j.cliBackends);
+      }
     } catch { /* fail-soft */ }
+  }
+
+  async function toggleFeatureFlag(key: "cliUi" | "cliBackends") {
+    const next = key === "cliUi" ? !cliUi : !cliBackends;
+    setFfBusy(key);
+    setFfMsg(null);
+    try {
+      const r = await fetch("/api/danger", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: next }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setCliUi(!!(j as { cliUi?: boolean }).cliUi);
+        setCliBackends(!!(j as { cliBackends?: boolean }).cliBackends);
+        // Reload the CLI list — enabling CLI management changes what's manageable.
+        void loadCli();
+      } else {
+        setFfMsg({ ok: false, text: (j as { error?: string }).error || `Failed (HTTP ${r.status}).` });
+      }
+    } catch (e) {
+      setFfMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setFfBusy("");
+    }
   }
 
   async function toggleEnvAccess() {
@@ -1380,6 +1416,62 @@ export default function SettingsTab() {
             {envMsg && (
               <span className={`settings-form-msg ${envMsg.ok ? "ok" : "err"}`}>{envMsg.text}</span>
             )}
+          </div>
+        </div>
+
+        {/* CLI features — runtime toggles, no .env edit */}
+        <div className="settings-card">
+          <div className="glass-fresnel" aria-hidden />
+          <div className="settings-card-head">
+            <span className="settings-icon-badge">
+              <Terminal strokeWidth={1.6} />
+            </span>
+            <div className="settings-card-titles">
+              <span className="settings-card-eyebrow">CLI</span>
+              <h2 className="settings-card-title">CLI features</h2>
+            </div>
+          </div>
+          <div className="settings-card-body">
+            <p className="settings-card-hint">
+              Turn CLI brains on without editing <span className="settings-inline-code">.env</span>.
+              (Installing a CLI&apos;s binary still needs the image built with{" "}
+              <span className="settings-inline-code">INSTALL_CLIS=1</span> — that part is build-time.)
+            </p>
+
+            <div className="settings-row" style={{ borderTop: "none", paddingTop: 0 }}>
+              <div className="settings-row-text">
+                <div className="settings-row-label">Manage CLI brains from Settings</div>
+                <div className="settings-row-hint">Shows the Subscription CLIs section (Claude / Codex / Gemini) and lets you enable/authenticate them.</div>
+              </div>
+              <button
+                type="button"
+                className={`settings-btn ${cliUi ? "danger" : "accent"}`}
+                onClick={() => void toggleFeatureFlag("cliUi")}
+                disabled={ffBusy === "cliUi"}
+              >
+                {cliUi ? "On" : "Off"}
+              </button>
+            </div>
+
+            <div className="settings-row" style={{ borderTop: "none", paddingTop: 0 }}>
+              <div className="settings-row-text">
+                <div className="settings-row-label">
+                  Custom CLI / command backends{" "}
+                  <span style={{ color: "var(--color-error)", fontSize: 11 }}>⚠ runs commands</span>
+                </div>
+                <div className="settings-row-hint">Lets &quot;Add a CLI&quot; register any command as a brain. These spawn operator-supplied commands (RCE by design) — only turn on if you trust what you add.</div>
+              </div>
+              <button
+                type="button"
+                className={`settings-btn ${cliBackends ? "danger" : "accent"}`}
+                onClick={() => void toggleFeatureFlag("cliBackends")}
+                disabled={ffBusy === "cliBackends"}
+              >
+                {cliBackends ? "On" : "Off"}
+              </button>
+            </div>
+
+            {ffMsg && <span className={`settings-form-msg ${ffMsg.ok ? "ok" : "err"}`}>{ffMsg.text}</span>}
           </div>
         </div>
 

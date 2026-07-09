@@ -10,7 +10,7 @@ import {
   deleteBackend as removeBackend,
   setBackendEnabled,
 } from "@/lib/ai/backends/registry";
-import { CLI_BACKENDS_ALLOWED, assertBackendAllowed, probeBackend } from "@/lib/ai/backends/gate";
+import { isCliBackendsAllowed, assertBackendAllowed, probeBackend } from "@/lib/ai/backends/gate";
 import { startServer, stopServer, serverStatus } from "@/lib/ai/backends/supervisor";
 import { getGithubToken, hasGithubToken, setGithubToken } from "@/lib/github-token";
 import { generateVapid, setVapid, vapidStatus } from "@/lib/vapid";
@@ -429,7 +429,7 @@ providers.get("/backends", async (c) => {
     if (b.kind === "cli-server") item.server = serverStatus(b.id) ?? { status: "stopped" };
     return item;
   });
-  return c.json({ uiAllowed: CLI_BACKENDS_ALLOWED, backends: items });
+  return c.json({ uiAllowed: isCliBackendsAllowed(), backends: items });
 });
 
 providers.put("/backends/:id", async (c) => {
