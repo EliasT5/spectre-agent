@@ -2,6 +2,13 @@ import { Hono } from "hono";
 import { createHmac } from "node:crypto";
 import { safeEqual } from "@/lib/auth/ct";
 import { createServiceSupabase } from "@/lib/supabase/server";
+import {
+  getTelegramWebhookSecret,
+  getTelegramAllowedIds,
+  getWhatsappVerifyToken,
+  getWhatsappAppSecret,
+  getWhatsappAllowedIds,
+} from "@/lib/channel-config";
 
 /**
  * Messaging channels — inbound side. A channel's webhook POSTs an incoming
@@ -37,10 +44,11 @@ function rateLimited(key: string): boolean {
   return false;
 }
 
-/** Comma-separated allowlist from an env var. DEFAULT-DENY: empty set = nobody. */
-function allowlist(envName: string): Set<string> {
+/** Comma-separated allowlist → Set. DEFAULT-DENY: empty string = nobody. The CSV
+ *  now comes from the channel-config getters (Settings-set, env fallback). */
+function toSet(csv: string): Set<string> {
   return new Set(
-    (process.env[envName] || "")
+    (csv || "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
@@ -103,7 +111,7 @@ async function enqueueTurn(
 // Secret = the per-bot token Telegram echoes in X-Telegram-Bot-Api-Secret-Token
 // (set when you call setWebhook).
 channels.post("/telegram/webhook", async (c) => {
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const secret = getTelegramWebhookSecret();
   if (!secret) return c.json({ ok: false }, 503); // fail closed
   if (!safeEqual(c.req.header("x-telegram-bot-api-secret-token"), secret)) {
     return c.json({ ok: false }, 401);
@@ -123,7 +131,7 @@ channels.post("/telegram/webhook", async (c) => {
 
   // Always 200 so Telegram doesn't retry; we just don't act on non-text/junk.
   if (!fromId || !chatId || !text) return c.json({ ok: true });
-  if (!allowlist("TELEGRAM_ALLOWED_SENDER_IDS").has(fromId)) return c.json({ ok: true });
+  if (!toSet(getTelegramAllowedIds()).has(fromId)) return c.json({ ok: true });
   if (rateLimited(`telegram:${fromId}`)) return c.json({ ok: true });
 
   const supabase = createServiceSupabase();
@@ -139,7 +147,7 @@ channels.post("/telegram/webhook", async (c) => {
 // ── WhatsApp (Meta Cloud API) ─────────────────────────────────────────────────
 // GET = webhook verification handshake (Meta sends hub.challenge once on setup).
 channels.get("/whatsapp/webhook", (c) => {
-  const verify = process.env.WHATSAPP_VERIFY_TOKEN;
+  const verify = getWhatsappVerifyToken();
   const mode = c.req.query("hub.mode");
   const token = c.req.query("hub.verify_token");
   const challenge = c.req.query("hub.challenge") ?? "";
@@ -152,7 +160,7 @@ channels.get("/whatsapp/webhook", (c) => {
 // POST = inbound messages. Boundary = the X-Hub-Signature-256 HMAC (App Secret)
 // over the RAW body, plus a default-deny sender (wa_id) allowlist.
 channels.post("/whatsapp/webhook", async (c) => {
-  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  const appSecret = getWhatsappAppSecret();
   if (!appSecret) return c.json({ ok: false }, 503); // fail closed
 
   const raw = await c.req.text();
@@ -171,7 +179,7 @@ channels.post("/whatsapp/webhook", async (c) => {
   }
 
   const supabase = createServiceSupabase();
-  const allowed = allowlist("WHATSAPP_ALLOWED_SENDER_IDS");
+  const allowed = toSet(getWhatsappAllowedIds());
 
   // Meta batches updates: entry[] → changes[] → value.messages[].
   for (const entry of body.entry ?? []) {

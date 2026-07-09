@@ -145,7 +145,11 @@ async function finishRun(runId, { status, output, error, threadId }) {
 }
 
 async function finishJob(job, error, threadId) {
-  const nextRunAt = error || job.schedule_type === "once" ? null : computeNextRun(job);
+  // A recurring job that errored must still get its next slot, or it strands
+  // forever: finishJob writes status "failed" (which /claim DOES re-select), but
+  // a null next_run_at never satisfies the claim's `next_run_at <= now` filter.
+  // Only 'once' jobs should stop; recurring failures retry on their next tick.
+  const nextRunAt = job.schedule_type === "once" ? null : computeNextRun(job);
   const enabled = error ? job.enabled : job.schedule_type === "once" ? false : job.enabled;
   const { error: updateError } = await supabase
     .from("scheduled_jobs")

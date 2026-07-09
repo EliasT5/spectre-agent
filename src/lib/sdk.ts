@@ -15,7 +15,20 @@ export async function call<T = unknown>(path: string, init?: RequestInit): Promi
     headers: { "Content-Type": "application/json", ...init?.headers },
     ...init,
   });
-  if (!res.ok) throw new Error(`core ${path} -> ${res.status}`);
+  if (!res.ok) {
+    // Surface the server's actual message (JSON {error} or raw body) instead of a
+    // bare status, so callers/dialogs can show WHY. Keep the status in parens —
+    // some callers still match on it (e.g. the workspace tab's 503 → "off" check).
+    let detail = "";
+    try {
+      const body = await res.text();
+      if (body) {
+        try { detail = String((JSON.parse(body) as { error?: unknown }).error ?? "").trim() || body; }
+        catch { detail = body; }
+      }
+    } catch { /* body unreadable */ }
+    throw new Error(detail ? `${detail} (${res.status})` : `${path} → ${res.status}`);
+  }
   const text = await res.text();
   return (text ? JSON.parse(text) : null) as T;
 }
@@ -44,6 +57,11 @@ export interface MonitorEvent {
   component: string;
   description: string;
 }
+export interface Connector {
+  name: string;
+  status: "connected" | "configured" | "needs-setup" | "off" | "error";
+  detail?: string;
+}
 
 /** The capability surface modules build on. */
 export const spectre = {
@@ -69,6 +87,8 @@ export const spectre = {
       call(`/threads/${threadId}/stop`, { method: "POST", body: JSON.stringify({ messageId }) }),
   },
   monitor: () => call<{ summary: { warnings: number; criticals: number }; events: MonitorEvent[] }>(`/monitor?limit=30`),
+  /** Secret-free health snapshot of every integration (for the Monitor tab). */
+  connectors: () => call<{ connectors: Connector[] }>(`/connectors`),
 
   // ── read surface (data a module can use; the engine stays hidden) ──
   usage: () => call(`/usage`),

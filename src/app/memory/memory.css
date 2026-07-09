@@ -543,6 +543,35 @@
 }
 .mem-card-edit-area:focus { border-color: rgba(99, 102, 241, 0.5); }
 
+/* ── Desktop: pin the page to the viewport ───────────────────────────────────
+   The base rules above are the phone layout (72px status-bar offset, 96px
+   bottom-nav allowance, natural page scroll). On desktop the shell's content
+   area (.dshell-main) would otherwise scroll the whole column — header,
+   sub-nav and search included — once the list grows. Follow the repo pattern:
+   page root pinned (height:100dvh + overflow:hidden), header/sub-nav stay
+   flex-shrink:0, and .mem-body becomes the internal scroll container. */
+[data-device="desktop"] .mem-page {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+[data-device="desktop"] .mem-col {
+  height: 100%;
+  min-height: 0;
+  padding-bottom: 0; /* phone bottom-nav allowance not needed on desktop */
+}
+
+[data-device="desktop"] .mem-header {
+  padding-top: 24px; /* phone status-bar offset not needed on desktop */
+}
+
+[data-device="desktop"] .mem-body {
+  min-height: 0;      /* let the flex child shrink so it can scroll */
+  overflow-y: auto;
+  padding-bottom: 32px; /* keep the last card clear of the viewport edge */
+}
+
 /* Similarity badge */
 .mem-sim-badge {
   font-family: var(--font-mono);

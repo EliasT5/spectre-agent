@@ -26,6 +26,10 @@ secrets.json
 # local self-hosted Supabase secrets
 local-db/.env
 
+# code-server local user state (generated); keep only the seeded settings
+deploy/code-server-user/*
+!deploy/code-server-user/settings.json
+
 # user-extensible harness data (skills/tools/mcp) — host-mounted, not shipped
 spectre-data/
 

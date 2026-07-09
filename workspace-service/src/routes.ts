@@ -23,6 +23,7 @@ import { streamSSE } from "hono/streaming";
 import { readFile, writeFile } from "node:fs/promises";
 import { readdirSync, statSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join, relative, isAbsolute, normalize, sep } from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   listAllSlots,
   getSlot,
@@ -45,8 +46,20 @@ import { formatSSEEvent } from "./lib/sse-redact.js";
 
 export const workspace = new Hono();
 
-// GH_TOKEN is server-side only; safe-spawn injects it into git/gh spawns.
+// The GitHub token is set from the Spectre UI (Settings) at runtime and injected
+// per-request by the trusted shell proxy as `x-gh-token`. Capture it into a
+// request-scoped store so every git/gh spawn picks it up without threading the
+// Context through ~20 call sites. Falls back to the GH_TOKEN env for legacy setups.
+const ghTokenStore = new AsyncLocalStorage<string | undefined>();
+workspace.use("*", async (c, next) => {
+  const hdr = c.req.header("x-gh-token");
+  await ghTokenStore.run(hdr && hdr.length > 0 ? hdr : undefined, next);
+});
+
+// GH token for git/gh spawns: the per-request UI token wins, then the env.
 function ghToken(): string | undefined {
+  const fromReq = ghTokenStore.getStore();
+  if (fromReq && fromReq.length > 0) return fromReq;
   const t = process.env.GH_TOKEN;
   return t && t.length > 0 ? t : undefined;
 }

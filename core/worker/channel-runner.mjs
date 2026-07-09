@@ -33,18 +33,22 @@ try {
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
-const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || "";
-const WA_GRAPH = `https://graph.facebook.com/${process.env.WHATSAPP_GRAPH_VERSION || "v21.0"}`;
-const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
+// Channel tokens are settable from Settings (app_config 'channels'); they start
+// from env and are refreshed live by refreshChannelConfig() — hence `let`, not
+// `const`, so the send functions below always read the current value.
+let TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+let WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
+let WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || "";
+let WA_GRAPH = `https://graph.facebook.com/${process.env.WHATSAPP_GRAPH_VERSION || "v21.0"}`;
+let DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
 const DISCORD_API = "https://discord.com/api/v10";
 const CORE_URL = process.env.SPECTRE_APP_URL || "http://127.0.0.1:8787";
 const POLL_MS = Number(process.env.CHANNEL_RUNNER_POLL_MS || 1500);
+const CONFIG_REFRESH_MS = Number(process.env.CHANNEL_CONFIG_REFRESH_MS || 10_000);
 
-// Default-deny allowlist (env, comma-separated). Empty = nobody.
-function allowlist(name) {
-  return new Set((process.env[name] || "").split(",").map((s) => s.trim()).filter(Boolean));
+// Default-deny allowlist (comma-separated). Empty = nobody.
+function toSet(csv) {
+  return new Set((csv || "").split(",").map((s) => s.trim()).filter(Boolean));
 }
 
 // Generated-image URL (a screenshot or openai.image output) embedded in a reply.
@@ -401,14 +405,53 @@ async function enqueueTurn(threadId, text) {
   await supabase.from("messages").insert({ thread_id: threadId, role: "assistant", content: "", status: "queued" });
 }
 
-if (DISCORD_BOT_TOKEN) {
-  const allowedDiscord = allowlist("DISCORD_ALLOWED_SENDER_IDS");
-  startDiscordGateway({
+// ── Runtime channel config + Discord gateway lifecycle ────────────────────────
+// Tokens can be set from Settings (app_config 'channels'). We refresh them every
+// CONFIG_REFRESH_MS so a public/self-hosted user never restarts this worker. The
+// Discord gateway holds a live socket, so a token change tears the old one down
+// and starts a new one; the allowlist is a live Set the handler reads each message.
+let allowedDiscord = new Set();
+let discordHandle = null;
+let discordRunningToken = "";
+
+async function refreshChannelConfig() {
+  let cfg = {};
+  try {
+    const { data } = await supabase.from("app_config").select("value").eq("key", "channels").maybeSingle();
+    if (data?.value) {
+      const v = JSON.parse(data.value);
+      if (v && typeof v === "object") cfg = v;
+    }
+  } catch {
+    /* fail-soft: keep the env fallback */
+  }
+  const pick = (v, env) => (v && String(v).trim() ? String(v).trim() : env || "");
+  TELEGRAM_BOT_TOKEN = pick(cfg.telegram?.botToken, process.env.TELEGRAM_BOT_TOKEN);
+  WHATSAPP_TOKEN = pick(cfg.whatsapp?.token, process.env.WHATSAPP_TOKEN);
+  WHATSAPP_PHONE_NUMBER_ID = pick(cfg.whatsapp?.phoneNumberId, process.env.WHATSAPP_PHONE_NUMBER_ID);
+  WA_GRAPH = `https://graph.facebook.com/${pick(cfg.whatsapp?.graphVersion, process.env.WHATSAPP_GRAPH_VERSION) || "v21.0"}`;
+  DISCORD_BOT_TOKEN = pick(cfg.discord?.botToken, process.env.DISCORD_BOT_TOKEN);
+  allowedDiscord = toSet(pick(cfg.discord?.allowedSenderIds, process.env.DISCORD_ALLOWED_SENDER_IDS));
+  syncDiscordGateway();
+}
+
+function syncDiscordGateway() {
+  if (DISCORD_BOT_TOKEN === discordRunningToken) return; // token unchanged
+  if (discordHandle) {
+    try { discordHandle.stop(); } catch { /* already down */ }
+    discordHandle = null;
+  }
+  discordRunningToken = DISCORD_BOT_TOKEN;
+  if (!DISCORD_BOT_TOKEN) {
+    console.log("[channel-runner] discord: no token — gateway off");
+    return;
+  }
+  discordHandle = startDiscordGateway({
     token: DISCORD_BOT_TOKEN,
     log: (s) => console.log(`[channel-runner] ${s}`),
     onMessage: async ({ channelId, authorId, content }) => {
       try {
-        if (!allowedDiscord.has(authorId)) return; // default-deny
+        if (!allowedDiscord.has(authorId)) return; // default-deny (live allowlist)
         if (rateLimited(`discord:${authorId}`)) return;
         const threadId = await ensureChannelThread("discord", authorId, `Discord · ${authorId}`, {
           type: "discord",
@@ -420,7 +463,13 @@ if (DISCORD_BOT_TOKEN) {
       }
     },
   });
+  console.log("[channel-runner] discord: gateway (re)started");
 }
+
+await refreshChannelConfig();
+setInterval(() => {
+  refreshChannelConfig().catch((e) => console.error(`[channel-runner] config refresh: ${e.message}`));
+}, CONFIG_REFRESH_MS);
 
 console.log(
   `[channel-runner] up — polling every ${POLL_MS}ms ` +

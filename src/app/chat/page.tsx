@@ -1,5 +1,6 @@
 "use client";
 
+import "./chat.css";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   MessageSquare,

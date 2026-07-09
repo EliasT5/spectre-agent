@@ -411,6 +411,20 @@
   font-size: 12.5px;
   line-height: 1.5;
 }
+
+/* Per-channel group inside the Channels card (Telegram / WhatsApp / Discord). */
+.settings-channel-block {
+  padding-top: 10px;
+  margin-top: 4px;
+  border-top: 1px solid var(--settings-hairline, rgba(255, 255, 255, 0.06));
+}
+.settings-channel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 0 8px 16px;
+  font-size: 13px;
+}
 .settings-form-msg.ok {
   color: var(--color-accent-hover);
 }
@@ -456,6 +470,13 @@
 .settings-models-group {
   display: flex;
   flex-direction: column;
+}
+
+/* Rename inputs sit in a plain block wrapper (.settings-row-text), so without
+   a width they collapse to the browser's ~20ch default and clip longer model
+   names while the rest of the 820px desktop row sits empty. Fill the row. */
+.settings-models-group .settings-row .settings-input {
+  width: 100%;
 }
 
 /* ── Error banner ────────────────────────────────────────────────────────── */

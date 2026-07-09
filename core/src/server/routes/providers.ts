@@ -12,6 +12,9 @@ import {
 } from "@/lib/ai/backends/registry";
 import { CLI_BACKENDS_ALLOWED, assertBackendAllowed, probeBackend } from "@/lib/ai/backends/gate";
 import { startServer, stopServer, serverStatus } from "@/lib/ai/backends/supervisor";
+import { getGithubToken, hasGithubToken, setGithubToken } from "@/lib/github-token";
+import { generateVapid, setVapid, vapidStatus } from "@/lib/vapid";
+import { channelsStatus, setChannels, type ChannelConfig } from "@/lib/channel-config";
 
 /**
  * /api/providers/models - add/remove a provider model on the LiteLLM gateway at
@@ -240,6 +243,113 @@ providers.put("/cli/bin", async (c) => {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 403);
   }
   return c.json({ ok: true, ...(await cliStateWithBinaries()) });
+});
+
+// ── GitHub token (runtime, set from Settings — no .env edit) ────────────────
+// Used by the Workspace clone/push flow. Stored in app_config; never echoed back
+// to the UI (GET /github reports only hasToken). The value endpoint is for the
+// trusted shell /api/workspace proxy to inject into the isolated workspace-service
+// (which holds no core creds), never for the browser.
+providers.get("/github", (c) => c.json({ hasToken: hasGithubToken() }));
+
+providers.put("/github/token", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { token?: string };
+  if (typeof body.token !== "string") {
+    return c.json({ error: "token (string; empty to clear) is required." }, 400);
+  }
+  await setGithubToken(body.token);
+  return c.json({ ok: true, hasToken: hasGithubToken() });
+});
+
+providers.get("/github/token", (c) => c.json({ token: getGithubToken() }));
+
+// "Just login" — GitHub OAuth device flow (like `gh auth login`). Default client
+// id is the GitHub CLI's public one (override with SPECTRE_GITHUB_CLIENT_ID);
+// GitHub shows "GitHub CLI" as the authorizing app. The granted token is stored in
+// the same app_config github_token, so the Workspace injection path is unchanged.
+const GH_CLIENT_ID = process.env.SPECTRE_GITHUB_CLIENT_ID || "178c6fc778ccc68e1d6a";
+const deviceSessions = new Map<string, { deviceCode: string; interval: number; expiresAt: number }>();
+
+providers.post("/github/device/start", async (c) => {
+  try {
+    const r = await fetch("https://github.com/login/device/code", {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: GH_CLIENT_ID, scope: "repo" }),
+    });
+    const j = (await r.json()) as {
+      device_code?: string; user_code?: string; verification_uri?: string;
+      interval?: number; expires_in?: number; error?: string;
+    };
+    if (!r.ok || !j.device_code) {
+      return c.json({ error: j.error || `GitHub device start failed (HTTP ${r.status}).` }, 502);
+    }
+    const sessionId = crypto.randomUUID();
+    deviceSessions.set(sessionId, {
+      deviceCode: j.device_code,
+      interval: j.interval ?? 5,
+      expiresAt: Date.now() + (j.expires_in ?? 900) * 1000,
+    });
+    return c.json({ sessionId, userCode: j.user_code, verificationUri: j.verification_uri, interval: j.interval ?? 5 });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+  }
+});
+
+providers.post("/github/device/poll", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { sessionId?: string };
+  const sid = body.sessionId;
+  const sess = sid ? deviceSessions.get(sid) : undefined;
+  if (!sid || !sess) return c.json({ status: "expired" });
+  if (Date.now() > sess.expiresAt) { deviceSessions.delete(sid); return c.json({ status: "expired" }); }
+  try {
+    const r = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: GH_CLIENT_ID,
+        device_code: sess.deviceCode,
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      }),
+    });
+    const j = (await r.json()) as { access_token?: string; error?: string; interval?: number };
+    if (j.access_token) {
+      await setGithubToken(j.access_token);
+      deviceSessions.delete(sid);
+      return c.json({ status: "authorized", hasToken: hasGithubToken() });
+    }
+    if (j.error === "authorization_pending") return c.json({ status: "pending" });
+    if (j.error === "slow_down") return c.json({ status: "pending", interval: j.interval });
+    deviceSessions.delete(sid); // expired_token / access_denied / unsupported
+    return c.json({ status: "error", error: j.error || "device flow failed" });
+  } catch (err) {
+    return c.json({ status: "error", error: err instanceof Error ? err.message : String(err) }, 502);
+  }
+});
+
+// ── Web push (VAPID) keys (runtime, set from Settings — no .env edit) ────────
+providers.get("/vapid", (c) => c.json(vapidStatus()));
+
+providers.put("/vapid", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as Partial<{ subject: string; publicKey: string; privateKey: string }>;
+  await setVapid(body);
+  return c.json({ ok: true, ...vapidStatus() });
+});
+
+providers.post("/vapid/generate", async (c) => {
+  const { publicKey } = await generateVapid();
+  return c.json({ ok: true, ...vapidStatus(), publicKey });
+});
+
+// ── Messaging channels (Telegram / WhatsApp / Discord) — runtime tokens ─────
+// Set from Settings, stored in app_config; the channel-runner worker refreshes
+// them live. Only `hasX` booleans + non-secret bits are ever returned.
+providers.get("/channels", (c) => c.json(channelsStatus()));
+
+providers.put("/channels", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as Partial<ChannelConfig>;
+  await setChannels(body);
+  return c.json({ ok: true, ...channelsStatus() });
 });
 
 // ── Model backends (unified: api / cli-server / cli-command) ────────────────

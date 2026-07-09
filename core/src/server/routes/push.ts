@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { sendPush } from "@/lib/notify";
+import { getVapidPublicKey } from "@/lib/vapid";
 
 export const push = new Hono();
 
 push.get("/vapid-public-key", (c) => {
-  const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const key = getVapidPublicKey();
   if (!key) {
     return c.json({ error: "VAPID not configured" }, 503);
   }

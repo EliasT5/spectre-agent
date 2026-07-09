@@ -17,6 +17,13 @@
   max-width: 560px;
 }
 
+/* Desktop: widen the column so it fills the content area instead of a
+   phone-width strip — same 820px used for .settings-col/.mem-col/.tempus-col
+   in desktop-shell.css (kept here so only monitor's own files change). */
+[data-device="desktop"] .monitor-tab .tab {
+  max-width: 820px;
+}
+
 /* ── Status pill in the tabhead status line ──────────────────────────────── */
 .mon-status-pill {
   display: inline-flex;
@@ -40,7 +47,8 @@
 }
 
 /* ── Event log: error-severity rows get a low-alpha red tint ────────────── */
-.mon-event-list {
+.mon-event-list,
+.mon-connector-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -71,11 +79,21 @@
   border-color: color-mix(in srgb, var(--color-warn) 36%, transparent);
 }
 
-/* Row head inside event rows */
+/* Row head inside event rows — wrap chips instead of pushing the row wider
+   than the column when a component name runs long. */
 .mon-row-head {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+}
+
+/* Event descriptions can contain long unbroken tokens (paths, URLs, stack
+   frames); break them inside the row so they never cause horizontal scroll. */
+.mon-event-wrap .list-row .row-body {
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 /* ── Empty / error states ────────────────────────────────────────────────── */

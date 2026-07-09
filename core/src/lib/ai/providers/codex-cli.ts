@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "child_process";
 import type { ChatMessage, StreamChunk, StreamOptions } from "./types";
 import { killProcessTree } from "./process-group";
 import { renderMcpToolBlock } from "../mcp-catalog";
-import { cliAllowed } from "../cli-gate";
+import { cliAllowed, getCliToken } from "../cli-gate";
 
 const CODEX_BIN = process.env.CODEX_CLI_BIN || "codex";
 
@@ -137,7 +137,13 @@ export async function* streamCodexCli(opts: StreamOptions): AsyncGenerator<Strea
   console.log(`[codex] spawn ${CODEX_BIN} ${args.slice(0, args.length - 1).join(" ")} <prompt:${prompt.length} chars>`);
   const proc = spawn(CODEX_BIN, args, {
     cwd: opts.cwd || process.env.SPECTRE_REPO_PATH || process.cwd(),
-    env: { ...process.env, TERM: "dumb" },
+    // A token set in Settings authenticates Codex via an OpenAI API key. Leave it
+    // unset to use a mounted ~/.codex login (ChatGPT-subscription auth) instead.
+    env: {
+      ...process.env,
+      TERM: "dumb",
+      ...(getCliToken("codex-cli") ? { OPENAI_API_KEY: getCliToken("codex-cli") as string } : {}),
+    },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });
