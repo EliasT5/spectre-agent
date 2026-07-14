@@ -22,6 +22,7 @@ const dir = resolve(import.meta.dirname, "..", "supabase");
 const ORDER = [
   "schema.sql",
   "durable-chat.sql",
+  "threads-recency.sql", // drops the metadata auto-bump trigger -> after schema.sql (which creates it)
   "channels.sql", // ALTERs messages (delivered_at) + channel_accounts -> after durable-chat
   "memory-embeddings.sql",
   "messages-embeddings.sql",

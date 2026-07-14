@@ -246,6 +246,24 @@ begin
 end $$;
 
 -- ============================================================
+-- threads-recency.sql
+-- ============================================================
+-- threads.updated_at = last ACTIVITY, not last metadata edit.
+--
+-- The base schema (schema.sql) installs an unconditional BEFORE UPDATE trigger
+-- (threads_updated_at -> update_updated_at) that rewrites updated_at = NOW() on
+-- EVERY update to a threads row. Because the chat list orders + date-buckets by
+-- updated_at, that made pure metadata edits — renaming a chat, moving it to a
+-- category, archiving it, pinning, changing its model, attaching a PDF, or
+-- re-homing chats when a category is deleted — wrongly shove the thread to the
+-- top of the list under "Today" with a just-now timestamp it never earned.
+--
+-- Real activity recency is already maintained by messages_touch_thread
+-- (AFTER INSERT ON messages), so the metadata auto-bump is both redundant for
+-- activity and harmful for edits. Drop it; recency now tracks actual messages.
+DROP TRIGGER IF EXISTS threads_updated_at ON threads;
+
+-- ============================================================
 -- channels.sql
 -- ============================================================
 -- Messaging channels: inbound webhook -> durable Spectre turn -> outbound delivery.

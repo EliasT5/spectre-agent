@@ -256,6 +256,16 @@ async function persistPolicy(opts: {
 }
 
 /**
+ * Irreversible/destructive tools that must NOT be blanket-authorized by a single
+ * "Allow for session" click. For these, allow_session still permits the CURRENT
+ * call, but no 12h always-allow policy is persisted — so every invocation
+ * re-prompts. Without this, one approval on e.g. chats.distill (distill a chat to
+ * memory, then permanently delete it) would let the agent loop and wipe the whole
+ * chat history unprompted. Keyed by the tool name the broker enqueues (dot form).
+ */
+const NO_SESSION_ALLOW = new Set<string>(["chats.distill"]);
+
+/**
  * Exported pre-seeder for the P1.1 bounded proactive run. Wrapper around
  * persistPolicy with throwOnError set so the proactive runner can detect a
  * missing/unmigrated tool_policies table and fall back to proposal-only.
@@ -419,7 +429,7 @@ export async function enqueue(
       settled = true;
       if (timer) clearTimeout(timer);
       logCall(tool, threadId, res.decision === "deny" ? "deny" : "allow", false);
-      if (res.decision === "allow_session") {
+      if (res.decision === "allow_session" && !NO_SESSION_ALLOW.has(tool)) {
         void persistPolicy({
           tool,
           scope: "thread",

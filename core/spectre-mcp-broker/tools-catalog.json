@@ -28,6 +28,13 @@
   { "category": "schedules", "name": "schedule.update", "description": "Update a durable scheduled job after approval." },
   { "category": "schedules", "name": "schedule.run_now", "description": "Make a schedule due immediately after approval." },
   { "category": "schedules", "name": "schedule.delete", "description": "Delete a schedule after approval." },
+  { "category": "chats", "name": "categories.list", "description": "List chat categories (id, name, description, color)." },
+  { "category": "chats", "name": "categories.create", "description": "Create a chat category after approval." },
+  { "category": "chats", "name": "categories.update", "description": "Update a chat category's name/description/color after approval." },
+  { "category": "chats", "name": "categories.delete", "description": "Delete a chat category (its chats fall back to Uncategorized) after approval." },
+  { "category": "chats", "name": "chats.list", "description": "List chats, optionally filtered by category and archived state." },
+  { "category": "chats", "name": "chats.move", "description": "Move a chat into or out of a category after approval." },
+  { "category": "chats", "name": "chats.distill", "description": "Distill a chat into long-term memory then permanently delete it, after approval." },
   { "category": "skills", "name": "skill.read", "description": "Load the full instructions of a skill listed in the skill index." },
   {
     "category": "tempus",
