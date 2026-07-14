@@ -99,3 +99,312 @@
 /* tool-result image inside a chip — globals caps its HEIGHT (20rem) but not
    its width; clamp it to the chip so a wide capture can't overflow. */
 .toolchip-img { max-width: 100%; }
+
+/* ============================================================================
+   CHAT LIST — categories (channel strip) + per-chat management
+   New co-located classes; extends the globals chat-list language, no overrides
+   beyond making the (now non-button) card container inert. Tokens only.
+   ========================================================================== */
+
+/* ── Category channel strip ─────────────────────────────────────────────────
+   The existing .chat-seg-row holds a horizontally-scrollable pill group plus a
+   pinned "+" that never scrolls off. */
+.chat-seg-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  display: flex;
+  scrollbar-width: none;
+}
+.chat-seg-scroll::-webkit-scrollbar { display: none; }
+
+/* Pills must keep their size and never wrap while the strip scrolls. */
+.chat-seg button { flex: 0 0 auto; white-space: nowrap; }
+
+/* Category colour dot inside a pill. */
+.chat-seg-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(99, 102, 241, 0.5);
+}
+
+/* Pinned "manage categories" + button (dashed, outside the scroll). */
+.chat-seg-add {
+  flex-shrink: 0;
+  margin-left: 8px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-sm);
+  border: 1px dashed var(--color-border-hover);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.18s var(--ease), border-color 0.18s var(--ease), background 0.18s var(--ease);
+}
+.chat-seg-add:hover {
+  color: var(--color-accent-hover);
+  border-color: var(--color-accent);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+/* ── Thread card: open-hit + kebab ──────────────────────────────────────────
+   The card is now a container (not a button); its inner .thread-card-hit is the
+   click target and the kebab opens the action sheet. */
+.thread-card { cursor: default; }
+
+.thread-card-hit {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-card-menu {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.18s var(--ease), background 0.18s var(--ease);
+}
+.thread-card-menu:hover { color: var(--color-text); background: rgba(255, 255, 255, 0.06); }
+/* On touch the kebab is always visible; on hover-capable pointers, reveal it on
+   card hover to keep the list clean. */
+@media (hover: hover) {
+  .thread-card-menu { opacity: 0; }
+  .thread-card:hover .thread-card-menu,
+  .thread-card-menu:focus-visible { opacity: 1; }
+}
+
+/* Inline rename input — replaces the title row on the card. */
+.thread-card-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--color-accent);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: 15px;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.14);
+}
+
+/* ── Bottom action sheet (shared: category manager + per-chat menu) ──────────*/
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.sheet {
+  width: 100%;
+  max-width: 520px;
+  max-height: 82dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-bottom: none;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5), var(--glow-sm);
+  animation: sheet-up 0.22s var(--ease);
+}
+@keyframes sheet-up {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+.sheet-heading { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.sheet-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-sub { font-size: 12.5px; color: var(--color-text-muted); }
+.sheet-close {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.sheet-close:hover { color: var(--color-text); background: rgba(255, 255, 255, 0.06); }
+.sheet-body { min-height: 0; overflow-y: auto; }
+.sheet-actions { display: flex; flex-direction: column; gap: 2px; }
+
+.sheet-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  padding: 13px 12px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 14.5px;
+  cursor: pointer;
+  transition: background 0.16s var(--ease);
+}
+.sheet-item:hover { background: rgba(255, 255, 255, 0.05); }
+.sheet-item.danger { color: var(--color-error); }
+.sheet-item.danger:hover { background: color-mix(in srgb, var(--color-error) 12%, transparent); }
+.sheet-item.back { color: var(--color-text-muted); font-size: 13px; padding: 8px 12px; }
+
+/* Move-to category picker. */
+.move-list { display: flex; flex-direction: column; gap: 2px; }
+.move-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.16s var(--ease);
+}
+.move-item:hover { background: rgba(255, 255, 255, 0.05); }
+.move-item-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.move-item-dot.none { border: 1px dashed var(--color-border-hover); }
+.move-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-item-check { color: var(--color-accent-hover); flex-shrink: 0; }
+
+/* ── Category manager ───────────────────────────────────────────────────────*/
+.cat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.cat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  background: rgba(15, 15, 26, 0.4);
+}
+.cat-row-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.cat-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cat-row-name { font-size: 14px; font-weight: 500; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-row-desc { font-size: 11.5px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-row-btn {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: color 0.16s var(--ease), background 0.16s var(--ease);
+}
+.cat-row-btn:hover { color: var(--color-text); background: rgba(255, 255, 255, 0.06); }
+.cat-row-btn.danger:hover { color: var(--color-error); background: color-mix(in srgb, var(--color-error) 12%, transparent); }
+.cat-row-btn.danger.confirm { color: var(--color-error); background: color-mix(in srgb, var(--color-error) 14%, transparent); }
+
+.cat-form { display: flex; flex-direction: column; gap: 10px; }
+.cat-form-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.cat-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.16s var(--ease), box-shadow 0.16s var(--ease);
+}
+.cat-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.14);
+}
+.cat-textarea { resize: vertical; min-height: 46px; line-height: 1.45; }
+
+.cat-swatches { display: flex; gap: 8px; }
+.cat-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  transition: transform 0.14s var(--ease), box-shadow 0.14s var(--ease);
+}
+.cat-swatch.sel { border-color: var(--color-text); box-shadow: 0 0 0 2px var(--color-surface), 0 0 10px rgba(99, 102, 241, 0.4); }
+
+.cat-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+
+/* On wider screens the sheet centers as a floating card rather than docking. */
+@media (min-width: 721px) {
+  .sheet-backdrop { align-items: center; }
+  .sheet {
+    border: 1px solid var(--color-border);
+    border-radius: var(--r-lg);
+  }
+}

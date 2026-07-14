@@ -393,6 +393,16 @@ async function apiFetch(baseUrl, path, opts = {}) {
 
 const appFetch = (path, opts) => apiFetch(APP_URL, path, opts);
 
+/** Best-effort chat title for approval prompts + result messages (never throws). */
+async function chatTitle(chatId) {
+  try {
+    const t = await appFetch(`/threads/${encodeURIComponent(chatId)}`);
+    return (t && typeof t.title === "string" && t.title.trim()) || "(untitled)";
+  } catch {
+    return "(unknown chat)";
+  }
+}
+
 function safeJson(text) {
   try {
     return JSON.parse(text);
@@ -1209,6 +1219,173 @@ server.registerTool(
       return { content: [{ type: "text", text: toolText(data) }] };
     } catch (err) {
       return toolErr("schedule.delete", err);
+    }
+  }
+);
+
+/* ─────────────────────── chat categories + chats ────────────────────────
+   Spectre can see and organize its own chats. A "category" is a bucket a user
+   (or Spectre) sorts chats into; a chat's category IS its project_id, and
+   "Uncategorized" means it has none. Reads are open; every mutation goes through
+   requireApproval, so interactively the user confirms, and an autonomous run
+   must carry a pre-seeded always_allow policy (same mechanism as the proactive
+   whitelist) before it can act. This is the surface a future background task
+   uses to, e.g., distill + delete every chat filed under a "Done"/"Trash"
+   category, or to auto-file chats into categories by their description. */
+
+server.registerTool(
+  "categories.list",
+  {
+    description:
+      "List chat categories (id, name, description, color). A category groups chats; a chat's category is its project_id. 'Uncategorized' = no category. The description says what belongs in the category.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const data = await appFetch("/projects");
+      return { content: [{ type: "text", text: toolText(data) }] };
+    } catch (err) {
+      return toolErr("categories.list", err);
+    }
+  }
+);
+
+server.registerTool(
+  "categories.create",
+  {
+    description:
+      "Create a chat category. `description` is what belongs in it (Spectre uses it to decide which chats to file here); `color` is an optional hex like '#6366f1'. Asks the user for approval first.",
+    inputSchema: {
+      name: z.string(),
+      description: z.string().optional(),
+      color: z.string().optional(),
+    },
+  },
+  async (input) => {
+    try {
+      await requireApproval("categories.create", input);
+      const data = await appFetch("/projects", { method: "POST", body: JSON.stringify(input) });
+      return { content: [{ type: "text", text: `Created category:\n${toolText(data)}` }] };
+    } catch (err) {
+      return toolErr("categories.create", err);
+    }
+  }
+);
+
+server.registerTool(
+  "categories.update",
+  {
+    description: "Update a chat category's name, description, and/or color by id. Asks the user for approval first.",
+    inputSchema: {
+      id: z.string(),
+      name: z.string().optional(),
+      description: z.string().optional(),
+      color: z.string().optional(),
+    },
+  },
+  async ({ id, ...patch }) => {
+    try {
+      await requireApproval("categories.update", { id, patch });
+      const data = await appFetch(`/projects/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      return { content: [{ type: "text", text: toolText(data) }] };
+    } catch (err) {
+      return toolErr("categories.update", err);
+    }
+  }
+);
+
+server.registerTool(
+  "categories.delete",
+  {
+    description:
+      "Delete a chat category by id. Chats filed under it are NOT deleted — they fall back to Uncategorized. Asks the user for approval first.",
+    inputSchema: { id: z.string(), reason: z.string().optional() },
+  },
+  async ({ id, reason }) => {
+    try {
+      await requireApproval("categories.delete", { id, reason });
+      const data = await appFetch(`/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+      return { content: [{ type: "text", text: toolText(data) }] };
+    } catch (err) {
+      return toolErr("categories.delete", err);
+    }
+  }
+);
+
+server.registerTool(
+  "chats.list",
+  {
+    description:
+      "List chats (conversations). Optionally filter by category: pass a category id in `category_id`, or 'none' for Uncategorized. `archived` is 'false' (default), 'true', or 'all'. Returns id, title, category_id, archived, updated_at.",
+    inputSchema: {
+      category_id: z.string().optional(),
+      archived: z.enum(["false", "true", "all"]).optional(),
+    },
+  },
+  async ({ category_id, archived }) => {
+    try {
+      const qs = new URLSearchParams();
+      if (category_id) qs.set("project_id", category_id);
+      if (archived) qs.set("archived", archived);
+      const q = qs.toString();
+      const rows = await appFetch(`/threads${q ? `?${q}` : ""}`);
+      const compact = (Array.isArray(rows) ? rows : []).map((t) => ({
+        id: t.id,
+        title: t.title,
+        category_id: t.project_id ?? null,
+        archived: !!t.archived,
+        updated_at: t.updated_at,
+      }));
+      return { content: [{ type: "text", text: toolText(compact) }] };
+    } catch (err) {
+      return toolErr("chats.list", err);
+    }
+  }
+);
+
+server.registerTool(
+  "chats.move",
+  {
+    description:
+      "Move a chat into a category, or out of one. Pass the target category id in `category_id`, or 'none' to make it Uncategorized. Asks the user for approval first.",
+    inputSchema: { chat_id: z.string(), category_id: z.string() },
+  },
+  async ({ chat_id, category_id }) => {
+    try {
+      const title = await chatTitle(chat_id);
+      await requireApproval("chats.move", { chat_id, title, category_id });
+      const project_id = category_id === "none" ? null : category_id;
+      await appFetch(`/threads/${encodeURIComponent(chat_id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ project_id }),
+      });
+      return { content: [{ type: "text", text: `Moved chat "${title}" (${chat_id}) → ${project_id ?? "Uncategorized"}.` }] };
+    } catch (err) {
+      return toolErr("chats.move", err);
+    }
+  }
+);
+
+server.registerTool(
+  "chats.distill",
+  {
+    description:
+      "Distill one chat into long-term memory, then PERMANENTLY DELETE the chat thread. Irreversible — the conversation is replaced by the extracted memories. Asks the user for approval first. This is the per-chat primitive a 'distill + delete everything in category X' cleanup calls.",
+    inputSchema: { chat_id: z.string(), reason: z.string().optional() },
+  },
+  async ({ chat_id, reason }) => {
+    try {
+      // Resolve the title FIRST so the approval prompt shows which conversation
+      // is about to be permanently deleted — an opaque UUID can't be verified.
+      const title = await chatTitle(chat_id);
+      await requireApproval("chats.distill", { chat_id, title, reason });
+      const data = await appFetch(`/threads/${encodeURIComponent(chat_id)}/distill`, { method: "POST" });
+      return { content: [{ type: "text", text: `Distilled + deleted chat "${title}" (${chat_id}):\n${toolText(data)}` }] };
+    } catch (err) {
+      return toolErr("chats.distill", err);
     }
   }
 );

@@ -75,6 +75,10 @@ COPY --from=build /app/dist/ ./dist/
 COPY --from=build /app/soul ./soul
 COPY --from=build /app/skills ./skills
 COPY --from=build /app/supabase ./supabase
+# The MCP tool catalog the compiled core reads at runtime (mcp-catalog.ts renders
+# it into the model's authoritative tool-list prompt block; /api/mcp serves it).
+# SPECTRE_REPO_PATH=/app, so it must live at /app/spectre-mcp-broker/.
+COPY --from=build /app/spectre-mcp-broker/tools-catalog.json ./spectre-mcp-broker/tools-catalog.json
 
 EXPOSE 8787
 # Default = the core API server. Compose overrides `command` for the satellites.

@@ -28,13 +28,34 @@ export const threads = new Hono();
 
 threads.get("/", async (c) => {
   const supabase = createServiceSupabase();
-  const { data, error } = await supabase
+  // ?archived= controls the archived bucket. Default (absent/"false") keeps the
+  // historical behaviour — non-archived only — so existing callers are unaffected.
+  // "true" = archived only; "all" = both (the chat tab uses this to load the
+  // active list + the Archived channel in a single fetch and split client-side).
+  const archived = c.req.query("archived");
+  let query = supabase
     .from("threads")
     .select("*")
-    .eq("archived", false)
     .order("pinned", { ascending: false })
     .order("updated_at", { ascending: false });
+  if (archived === "true") query = query.eq("archived", true);
+  else if (archived !== "all") query = query.eq("archived", false);
 
+  // ?project_id= filters by category: an id scopes to that category, "none"
+  // scopes to Uncategorized (project_id IS NULL). Absent = all categories.
+  const projectId = c.req.query("project_id");
+  if (projectId === "none") {
+    query = query.is("project_id", null);
+  } else if (projectId) {
+    // project_id is a UUID column; a malformed id would make Postgres raise
+    // 22P02 → 500. An agent may guess an id, so treat a bad one as "no matches".
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)) {
+      return c.json([]);
+    }
+    query = query.eq("project_id", projectId);
+  }
+
+  const { data, error } = await query;
   if (error) {
     return c.json({ error: error.message }, 500);
   }

@@ -19,10 +19,16 @@ import {
   Wrench,
   ArrowLeft,
   Loader2,
+  MoreVertical,
+  FolderPlus,
+  Archive,
 } from "lucide-react";
 import { SpectreBackButton } from "@/components/SpectreBackButton";
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown";
 import { subscribeThreadStream } from "@/lib/thread-stream";
+import { CategorySheet } from "./CategorySheet";
+import { ThreadActionSheet } from "./ThreadActionSheet";
+import { type Thread, type Category } from "./types";
 
 /**
  * Real chat: a thread list you can revisit + a durable, live-streamed
@@ -50,17 +56,6 @@ type Msg = {
   created_at: string;
 };
 
-type ThreadMeta = { pdf_ids?: string[]; kind?: string };
-type Thread = {
-  id: string;
-  title: string | null;
-  created_at: string;
-  updated_at: string;
-  archived?: boolean;
-  metadata?: ThreadMeta;
-  model_hint?: string | null;
-  reasoning_effort?: string | null;
-};
 type PendingReq = { reqId: string; threadId: string; tool: string; input?: unknown; createdAt: number };
 type PdfDoc = { id: string; filename: string; title: string | null; status: string };
 type ModelOption = {
@@ -125,22 +120,59 @@ export default function ChatTab() {
   const [models, setModels] = useState<ModelOption[]>([AUTO_MODEL]);
   const [modelOpen, setModelOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  // Categories (backed by the `projects` table) + which channel is active.
+  // activeCat: "all" | "uncat" | "archived" | <categoryId>.
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [activeCat, setActiveCat] = useState<string>("all");
+  const [catSheetOpen, setCatSheetOpen] = useState(false);
+  const [actionThread, setActionThread] = useState<Thread | null>(null);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const modelDdRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
 
+  // Load BOTH buckets in one fetch — non-archived drive the category channels,
+  // archived drive the "Archived" channel; we split them client-side.
   const loadThreads = async () => {
-    const r = await fetch("/api/threads");
+    const r = await fetch("/api/threads?archived=all");
     if (r.ok) {
       const data = await r.json();
       const arr: Thread[] = Array.isArray(data) ? data : data.threads ?? [];
-      setThreads(arr.filter((t) => !t.archived));
+      setThreads(arr);
     }
   };
   useEffect(() => {
     loadThreads();
   }, []);
+
+  // Categories.
+  const loadCategories = async () => {
+    try {
+      const r = await fetch("/api/projects");
+      if (!r.ok) return;
+      const d = await r.json();
+      setCategories(Array.isArray(d) ? d : d.projects ?? []);
+    } catch {
+      /* ignore */
+    }
+  };
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  // Don't strand the user on a channel that no longer has a pill. The
+  // UNCATEGORIZED/ARCHIVED pills only render while they have chats, and a
+  // category pill vanishes if the category is deleted — snap back to ALL so the
+  // list never goes blank with nothing selected.
+  useEffect(() => {
+    const gone =
+      (activeCat === "archived" && !threads.some((t) => t.archived)) ||
+      (activeCat === "uncat" && !threads.some((t) => !t.archived && !t.project_id)) ||
+      (!["all", "uncat", "archived"].includes(activeCat) && !categories.some((c) => c.id === activeCat));
+    if (gone) setActiveCat("all");
+  }, [threads, categories, activeCat]);
 
   // Available models for the per-thread route override (from enriched /api/models).
   useEffect(() => {
@@ -295,6 +327,10 @@ export default function ChatTab() {
   const currentReasoningEffort = currentThread?.reasoning_effort ?? "";
   const showEffortPicker = currentModel.reasoning === true && Array.isArray(currentModel.effortLevels) && currentModel.effortLevels.length > 0;
 
+  // A new chat inherits the active category (only a real category id counts —
+  // "all"/"uncat"/"archived" seed no project).
+  const activeCatId = categories.some((c) => c.id === activeCat) ? activeCat : null;
+
   async function startNewThread() {
     if (creating) return;
     setCreating(true);
@@ -302,7 +338,7 @@ export default function ChatTab() {
       const r = await fetch("/api/threads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New chat" }),
+        body: JSON.stringify({ title: "New chat", project_id: activeCatId }),
       });
       if (r.ok) {
         const t = await r.json();
@@ -326,12 +362,93 @@ export default function ChatTab() {
     setModelOpen(false);
   }
 
+  const patchThreadLocal = (id: string, patch: Partial<Thread>) =>
+    setThreads((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+
+  /* ── Category (projects) CRUD ── */
+  async function createCategory(v: { name: string; description: string; color: string }) {
+    await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(v),
+    }).catch(() => {});
+    await loadCategories();
+  }
+  async function updateCategory(id: string, v: { name: string; description: string; color: string }) {
+    await fetch(`/api/projects/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(v),
+    }).catch(() => {});
+    await loadCategories();
+  }
+  async function deleteCategory(id: string) {
+    setCategories((prev) => prev.filter((c) => c.id !== id));
+    // Optimistically re-home this category's chats to Uncategorized (mirrors the
+    // server). Do NOT loadThreads() here: a full refetch in list mode could
+    // clobber an in-flight optimistic rename/move/archive on another chat.
+    setThreads((prev) => prev.map((t) => (t.project_id === id ? { ...t, project_id: null } : t)));
+    if (activeCat === id) setActiveCat("all");
+    const r = await fetch(`/api/projects/${id}`, { method: "DELETE" }).catch(() => null);
+    if (!r || !r.ok) await Promise.all([loadCategories(), loadThreads()]);
+    else await loadCategories();
+  }
+
+  /* ── Per-chat management (rename / move / archive / delete) ──
+     All reuse the existing PATCH/DELETE /threads/:id. Optimistic; on a network
+     failure we reconcile by reloading. Rename/move/archive intentionally do NOT
+     refetch, so a renamed chat doesn't jump to the top of the updated_at order. */
+  async function renameThread(id: string, title: string) {
+    patchThreadLocal(id, { title });
+    await fetch(`/api/threads/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    }).catch(() => loadThreads());
+  }
+  async function moveThread(id: string, projectId: string | null) {
+    patchThreadLocal(id, { project_id: projectId });
+    await fetch(`/api/threads/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: projectId }),
+    }).catch(() => loadThreads());
+  }
+  async function setThreadArchived(id: string, archived: boolean) {
+    patchThreadLocal(id, { archived });
+    await fetch(`/api/threads/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    }).catch(() => loadThreads());
+  }
+  async function deleteThread(id: string) {
+    setThreads((prev) => prev.filter((t) => t.id !== id));
+    if (threadId === id) backToList();
+    const r = await fetch(`/api/threads/${id}`, { method: "DELETE" }).catch(() => null);
+    if (!r || !r.ok) loadThreads();
+  }
+
+  function startRename(id: string) {
+    const t = threads.find((x) => x.id === id);
+    setRenameVal(t?.title?.trim() || "");
+    setRenameId(id);
+  }
+  function commitRename() {
+    if (renameId == null) return;
+    const id = renameId;
+    const v = renameVal.trim();
+    setRenameId(null);
+    const cur = threads.find((x) => x.id === id);
+    if (v && v !== (cur?.title ?? "")) renameThread(id, v);
+  }
+
   async function ensureThread(seedTitle?: string): Promise<string | null> {
     if (threadId) return threadId;
     const r = await fetch("/api/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: seedTitle?.slice(0, 60) || "New chat" }),
+      body: JSON.stringify({ title: seedTitle?.slice(0, 60) || "New chat", project_id: activeCatId }),
     });
     if (!r.ok) return null;
     const tid = (await r.json()).id;
@@ -423,7 +540,20 @@ export default function ChatTab() {
 
   /* ── LIST MODE ── */
   if (!threadId) {
-    const grouped = groupByDate(threads);
+    const live = threads.filter((t) => !t.archived);
+    const arch = threads.filter((t) => t.archived);
+    const hasCats = categories.length > 0;
+    const uncatCount = live.filter((t) => !t.project_id).length;
+    const archivedView = activeCat === "archived";
+    const filtered =
+      activeCat === "all"
+        ? live
+        : activeCat === "uncat"
+          ? live.filter((t) => !t.project_id)
+          : archivedView
+            ? arch
+            : live.filter((t) => t.project_id === activeCat);
+    const grouped = groupByDate(filtered);
     return (
       <div className="chat-list-page">
         <SpectreBackButton />
@@ -434,8 +564,8 @@ export default function ChatTab() {
               <span className="chat-eyebrow">AT YOUR SERVICE</span>
               <h1 className="chat-display-title">Spectre</h1>
               <p className="chat-conv-count">
-                {threads.length > 0
-                  ? `${threads.length} conversation${threads.length === 1 ? "" : "s"}`
+                {live.length > 0
+                  ? `${live.length} conversation${live.length === 1 ? "" : "s"}`
                   : "Ready when you are"}
               </p>
             </div>
@@ -455,15 +585,53 @@ export default function ChatTab() {
 
           <div className="hairline-gradient" style={{ margin: "0 20px" }} />
 
-          {/* Segmented control */}
+          {/* Category channel strip: ALL · categories · Uncategorized · Archived, with a pinned manage-"+" */}
           <div className="chat-seg-row">
-            <div className="seg chat-seg">
-              <button className="on">
-                <MessageSquare size={13} strokeWidth={1.8} />
-                <span>CHATS</span>
-                <span className="seg-count">{threads.length}</span>
-              </button>
+            <div className="chat-seg-scroll">
+              <div className="seg chat-seg">
+                <button className={activeCat === "all" ? "on" : ""} aria-pressed={activeCat === "all"} onClick={() => setActiveCat("all")}>
+                  <MessageSquare size={13} strokeWidth={1.8} />
+                  <span>ALL</span>
+                  <span className="seg-count">{live.length}</span>
+                </button>
+                {categories.map((c) => {
+                  const n = live.filter((t) => t.project_id === c.id).length;
+                  return (
+                    <button
+                      key={c.id}
+                      className={activeCat === c.id ? "on" : ""}
+                      aria-pressed={activeCat === c.id}
+                      onClick={() => setActiveCat(c.id)}
+                    >
+                      <span className="chat-seg-dot" style={{ background: c.color ?? "#6366f1" }} />
+                      <span>{c.name}</span>
+                      <span className="seg-count">{n}</span>
+                    </button>
+                  );
+                })}
+                {hasCats && uncatCount > 0 && (
+                  <button className={activeCat === "uncat" ? "on" : ""} aria-pressed={activeCat === "uncat"} onClick={() => setActiveCat("uncat")}>
+                    <span>UNCATEGORIZED</span>
+                    <span className="seg-count">{uncatCount}</span>
+                  </button>
+                )}
+                {arch.length > 0 && (
+                  <button className={activeCat === "archived" ? "on" : ""} aria-pressed={activeCat === "archived"} onClick={() => setActiveCat("archived")}>
+                    <Archive size={13} strokeWidth={1.8} />
+                    <span>ARCHIVED</span>
+                    <span className="seg-count">{arch.length}</span>
+                  </button>
+                )}
+              </div>
             </div>
+            <button
+              className="chat-seg-add tap-press"
+              onClick={() => setCatSheetOpen(true)}
+              aria-label="Manage categories"
+              title="Manage categories"
+            >
+              <FolderPlus size={16} strokeWidth={1.8} />
+            </button>
           </div>
 
           {/* Thread list */}
@@ -479,6 +647,12 @@ export default function ChatTab() {
                   New conversation
                 </button>
               </div>
+            ) : filtered.length === 0 ? (
+              <div className="chat-list-empty">
+                <p style={{ fontSize: 14, color: "var(--color-text-muted)", paddingTop: 48 }}>
+                  {archivedView ? "No archived chats." : "No chats in this category yet."}
+                </p>
+              </div>
             ) : (
               <div className="chat-list-groups">
                 {grouped.map(([label, list]) => (
@@ -487,22 +661,51 @@ export default function ChatTab() {
                     <ul className="thread-cards">
                       {list.map((t) => (
                         <li key={t.id}>
-                          <button
-                            className="thread-card tap-press"
-                            onClick={() => openThread(t.id)}
-                          >
-                            <span className="thread-card-icon">
-                              <MessageSquare size={18} strokeWidth={1.8} />
-                            </span>
-                            <span className="thread-card-body">
-                              <span className="thread-card-title">
-                                {t.title?.trim() || "New conversation"}
-                              </span>
-                              <span className="thread-card-time">
-                                {formatTime(t.updated_at ?? t.created_at)}
-                              </span>
-                            </span>
-                          </button>
+                          <div className="thread-card">
+                            {renameId === t.id ? (
+                              <input
+                                className="thread-card-rename"
+                                value={renameVal}
+                                onChange={(e) => setRenameVal(e.target.value)}
+                                onBlur={commitRename}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    commitRename();
+                                  } else if (e.key === "Escape") {
+                                    setRenameId(null);
+                                  }
+                                }}
+                                maxLength={120}
+                                aria-label="Rename chat"
+                                // eslint-disable-next-line jsx-a11y/no-autofocus
+                                autoFocus
+                              />
+                            ) : (
+                              <button className="thread-card-hit tap-press" onClick={() => openThread(t.id)}>
+                                <span className="thread-card-icon">
+                                  <MessageSquare size={18} strokeWidth={1.8} />
+                                </span>
+                                <span className="thread-card-body">
+                                  <span className="thread-card-title">
+                                    {t.title?.trim() || "New conversation"}
+                                  </span>
+                                  <span className="thread-card-time">
+                                    {formatTime(t.updated_at ?? t.created_at)}
+                                  </span>
+                                </span>
+                              </button>
+                            )}
+                            {renameId !== t.id && (
+                              <button
+                                className="thread-card-menu tap-press"
+                                onClick={() => setActionThread(t)}
+                                aria-label="Chat actions"
+                              >
+                                <MoreVertical size={16} strokeWidth={1.8} />
+                              </button>
+                            )}
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -512,6 +715,29 @@ export default function ChatTab() {
             )}
           </div>
         </div>
+
+        {catSheetOpen && (
+          <CategorySheet
+            categories={categories}
+            onCreate={createCategory}
+            onUpdate={updateCategory}
+            onDelete={deleteCategory}
+            onClose={() => setCatSheetOpen(false)}
+          />
+        )}
+        {actionThread && (
+          <ThreadActionSheet
+            thread={actionThread}
+            categories={categories}
+            archivedView={!!actionThread.archived}
+            onClose={() => setActionThread(null)}
+            onStartRename={startRename}
+            onMove={moveThread}
+            onArchive={(id) => setThreadArchived(id, true)}
+            onUnarchive={(id) => setThreadArchived(id, false)}
+            onDelete={deleteThread}
+          />
+        )}
       </div>
     );
   }
