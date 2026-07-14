@@ -20,9 +20,9 @@
 
 ---
 
-> ## ⚠️ Recently opened. Read the code before you run it
+> ## ⚠️ Read the code before you run it
 >
-> The core went public sooner than planned, and the latest commit hasn't been through a full clean-room test yet. This is early-stage software that runs with shell access. Read the files and verify it yourself before you run anything on your machine. Don't take my word that it's safe.
+> Every push and PR now runs through CI: typechecks across the shell and the core, broker unit tests, a production build, a from-source compile smoke, and a secret scan. That is unit and build-gate coverage, not full end-to-end coverage. This is still early-stage software that runs with shell access. Read the files and verify it yourself before you run anything on your machine. Don't take my word that it's safe.
 
 ---
 
@@ -51,6 +51,18 @@ _On the name: **Spectre Agent** runs on your own machine and answers only to you
 
 ## Quick Install
 
+**Install with your AI CLI (recommended)**
+
+You're installing an AI agent, so let one do the installing: your CLI adapts to your exact OS, installs whatever is missing, runs the same wizard, and hands you the terminal when the wizard needs a human. Tell Claude Code, Codex, Gemini CLI, or any agentic CLI:
+
+```text
+Install Spectre Agent on this machine from https://github.com/EliasT5/spectre-agent — follow the playbook in its agent-install/ folder exactly.
+```
+
+The step-by-step playbook lives at [`agent-install/`](agent-install/): every guardrail, from prerequisite checks to a verified daemon setup.
+
+**Or, the one-line script**
+
 **Linux / macOS**
 
 ```bash
@@ -63,7 +75,7 @@ curl -fsSL https://elias-teubner.dev/install.sh | sh
 irm https://elias-teubner.dev/install.ps1 | iex
 ```
 
-One line. The installer brings everything else, and if git, Docker or Node are missing it offers to install them too. Then it asks three questions:
+Both paths bootstrap the same Node wizard, `installer/install.mjs`. It checks for git, Docker, and Node, then asks three questions:
 
 - **Which database.** A bundled local one (default, no cloud account anywhere) or your own Supabase project.
 - **Which model.** Local Ollama by default, zero API keys. Or any provider through the gateway.
@@ -260,6 +272,7 @@ Built in stages. Now: **early development**, then harden & expand, then the [Wor
 
 | Doc | What's in it |
 |---|---|
+| [`agent-install/`](agent-install/) | Playbook an AI CLI follows to install Spectre Agent and set up the daemon |
 | [`docs/M6-INSTALLER.md`](docs/M6-INSTALLER.md) | Full install and operations guide, troubleshooting |
 | [`docs/MODULES.md`](docs/MODULES.md) | Module SDK: build your own tools and screens |
 | [`.env.docker.example`](.env.docker.example) | Every knob, documented |
