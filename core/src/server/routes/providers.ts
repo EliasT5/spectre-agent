@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { CLI_IDS, getCliGate, setCliEnabled, setCliToken, setCliBin, probeCliBinary, type CliId } from "@/lib/ai/cli-gate";
+import { CLI_IDS, getCliGate, setCliEnabled, setCliToken, setCliBin, getCliBin, probeCliBinary, type CliId } from "@/lib/ai/cli-gate";
+import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { validateBackend } from "@/lib/ai/backends/schema";
 import { buildApiLiteLLMBody } from "@/lib/ai/backends/litellm-map";
 import { registerModel, deleteModel } from "@/lib/ai/backends/litellm-admin";
@@ -243,6 +244,101 @@ providers.put("/cli/bin", async (c) => {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 403);
   }
   return c.json({ ok: true, ...(await cliStateWithBinaries()) });
+});
+
+// ── CLI subscription login (in-Settings, like the GitHub login) ─────────────
+// The Claude CLI's `setup-token` runs an OAuth flow: under a PTY it prints a sign-in
+// URL (redirects to platform.claude.com, NOT localhost — so it works from any
+// browser, even remotely), the user authorizes + gets a code, pastes it back, and
+// the CLI emits a long-lived token. We drive that from Settings so there's no
+// terminal + no manual paste of a setup-token command: `start` spawns it and returns
+// the URL; `complete` feeds the pasted code + captures the token into cli_tokens.
+// (Codex uses a different, file-based auth — separate flow, TODO.)
+type CliLoginSession = { child: ChildProcessWithoutNullStreams; buf: string; id: CliId; createdAt: number; closed: boolean };
+const cliLoginSessions = new Map<string, CliLoginSession>();
+
+function gcCliLogins() {
+  const now = Date.now();
+  for (const [k, s] of cliLoginSessions) {
+    if (now - s.createdAt > 10 * 60 * 1000) {
+      try { s.child.kill(); } catch { /* */ }
+      cliLoginSessions.delete(k);
+    }
+  }
+}
+
+// Strip ANSI CSI + OSC (hyperlink) escape sequences so we can scrape the URL/token.
+function stripAnsi(s: string): string {
+  return s
+    .replace(/\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[=>]/g, "");
+}
+
+providers.post("/cli/login/start", async (c) => {
+  gcCliLogins();
+  const body = (await c.req.json().catch(() => ({}))) as { id?: string };
+  if (body.id !== "claude-code") {
+    return c.json({ error: "One-click login is currently supported for the Claude CLI only." }, 400);
+  }
+  const id = body.id as CliId;
+  const bin = getCliBin(id);
+  // `script` allocates a PTY so the CLI prints the sign-in URL (it stays silent on a pipe).
+  const child = spawn("script", ["-qec", `${bin} setup-token`, "/dev/null"], {
+    env: process.env,
+  }) as ChildProcessWithoutNullStreams;
+  const sessionId = crypto.randomUUID();
+  const sess: CliLoginSession = { child, buf: "", id, createdAt: Date.now(), closed: false };
+  cliLoginSessions.set(sessionId, sess);
+  child.stdout.on("data", (d) => { sess.buf += d.toString(); });
+  child.stderr.on("data", (d) => { sess.buf += d.toString(); });
+  child.on("close", () => { sess.closed = true; });
+  child.on("error", () => { sess.closed = true; });
+
+  const urlRe = /https:\/\/claude\.com\/cai\/oauth\/authorize\?[^\s"'\x1b\]]+/;
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    const m = urlRe.exec(stripAnsi(sess.buf));
+    if (m) return c.json({ sessionId, url: m[0], needsCode: true });
+    if (sess.closed) break;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  try { child.kill(); } catch { /* */ }
+  cliLoginSessions.delete(sessionId);
+  return c.json({ error: "Couldn't start the Claude login — no sign-in URL was produced (is the CLI installed?)." }, 500);
+});
+
+providers.post("/cli/login/complete", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { sessionId?: string; code?: string };
+  const sess = body.sessionId ? cliLoginSessions.get(body.sessionId) : undefined;
+  if (!sess) return c.json({ error: "Login session expired — start the login again." }, 404);
+  const code = (body.code || "").trim();
+  if (!code) return c.json({ error: "The authorization code is required." }, 400);
+
+  try { sess.child.stdin.write(code + "\n"); } catch { /* */ }
+
+  // The long-lived token setup-token prints on success.
+  const tokenRe = /sk-ant-oat[0-9]*-[A-Za-z0-9_-]{20,}/;
+  const deadline = Date.now() + 30000;
+  let token = "";
+  while (Date.now() < deadline) {
+    const m = tokenRe.exec(stripAnsi(sess.buf));
+    if (m) { token = m[0]; break; }
+    if (sess.closed) {
+      const m2 = tokenRe.exec(stripAnsi(sess.buf));
+      if (m2) token = m2[0];
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  try { sess.child.kill(); } catch { /* */ }
+  cliLoginSessions.delete(body.sessionId!);
+  if (!token) {
+    return c.json({ error: "Didn't capture a token — the code may be wrong or expired. Start again and retry." }, 400);
+  }
+  await setCliToken(sess.id, token);
+  return c.json({ ok: true, hasToken: true, ...(await cliStateWithBinaries()) });
 });
 
 // ── GitHub token (runtime, set from Settings — no .env edit) ────────────────

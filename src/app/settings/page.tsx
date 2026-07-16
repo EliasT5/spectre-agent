@@ -166,6 +166,11 @@ export default function SettingsTab() {
   const [ghBusy, setGhBusy] = useState(false);
   const [ghMsg, setGhMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [ghDevice, setGhDevice] = useState<{ userCode: string; verificationUri: string } | null>(null);
+  // Claude CLI one-click login (like the GitHub login): start → sign-in URL → paste code.
+  const [claudeLogin, setClaudeLogin] = useState<{ sessionId: string; url: string } | null>(null);
+  const [claudeLoginCode, setClaudeLoginCode] = useState("");
+  const [claudeLoginBusy, setClaudeLoginBusy] = useState(false);
+  const [claudeLoginMsg, setClaudeLoginMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Danger Zone toggles.
   const [envAccess, setEnvAccess] = useState(false);
@@ -432,6 +437,61 @@ export default function SettingsTab() {
       setCliMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
     } finally {
       setCliBusy(null);
+    }
+  }
+
+  // One-click Claude CLI login (mirrors the GitHub device login). Start drives
+  // `claude setup-token` under the core, surfacing its sign-in URL; the user
+  // authorizes in a browser, pastes the code, and the core captures the token.
+  async function startClaudeLogin() {
+    setClaudeLoginBusy(true);
+    setClaudeLoginMsg(null);
+    setClaudeLogin(null);
+    setClaudeLoginCode("");
+    try {
+      const r = await fetch("/api/providers/cli/login/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "claude-code" }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && (j as { url?: string }).url) {
+        setClaudeLogin({ sessionId: (j as { sessionId: string }).sessionId, url: (j as { url: string }).url });
+        try { window.open((j as { url: string }).url, "_blank", "noopener,noreferrer"); } catch { /* popup blocked — link is shown */ }
+      } else {
+        setClaudeLoginMsg({ ok: false, text: (j as { error?: string }).error || `Couldn't start login (HTTP ${r.status}).` });
+      }
+    } catch (e) {
+      setClaudeLoginMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setClaudeLoginBusy(false);
+    }
+  }
+
+  async function completeClaudeLogin() {
+    if (!claudeLogin || !claudeLoginCode.trim()) return;
+    setClaudeLoginBusy(true);
+    setClaudeLoginMsg(null);
+    try {
+      const r = await fetch("/api/providers/cli/login/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: claudeLogin.sessionId, code: claudeLoginCode.trim() }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && (j as { hasToken?: boolean }).hasToken) {
+        if ((j as CliState).items) setCli(j as CliState);
+        else loadCli();
+        setClaudeLogin(null);
+        setClaudeLoginCode("");
+        setClaudeLoginMsg({ ok: true, text: "Logged in — token captured." });
+      } else {
+        setClaudeLoginMsg({ ok: false, text: (j as { error?: string }).error || `Login failed (HTTP ${r.status}).` });
+      }
+    } catch (e) {
+      setClaudeLoginMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setClaudeLoginBusy(false);
     }
   }
 
@@ -2541,7 +2601,7 @@ export default function SettingsTab() {
                                 <span className="settings-inline-code">INSTALL_CLIS=1</span>, or set a binary path below.{" "}</>
                               )}
                               {it.id === "claude-code" && (
-                                <>Auth: run <span className="settings-inline-code">claude setup-token</span> on your computer, then paste the token below.</>
+                                <>Auth: click <b>Log in with Claude</b> below — sign in in your browser and paste the code back. No terminal needed. (Advanced: paste a <span className="settings-inline-code">claude setup-token</span> token instead.)</>
                               )}
                               {it.id === "codex-cli" && (
                                 <>Auth: paste an OpenAI API key below (billed per use), or mount your{" "}
@@ -2551,6 +2611,69 @@ export default function SettingsTab() {
                                 <>Auth: paste a Google AI (Gemini) API key below.</>
                               )}
                             </p>
+                            {/* One-click Claude login (device flow, like the GitHub login). */}
+                            {it.id === "claude-code" && (
+                              <div style={{ padding: "0 16px 8px" }}>
+                                {!claudeLogin ? (
+                                  <button
+                                    type="button"
+                                    className="settings-btn tap-press"
+                                    style={{ height: 34 }}
+                                    onClick={startClaudeLogin}
+                                    disabled={claudeLoginBusy}
+                                  >
+                                    {claudeLoginBusy ? "Starting…" : it.hasToken ? "Log in with Claude again" : "Log in with Claude"}
+                                  </button>
+                                ) : (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                    <div style={{ fontSize: 12, opacity: 0.9 }}>
+                                      A browser tab should have opened. If not,{" "}
+                                      <a href={claudeLogin.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "underline" }}>
+                                        open the sign-in page
+                                      </a>
+                                      . After authorizing, paste the code Claude gives you:
+                                    </div>
+                                    <div className="settings-cli-subrow">
+                                      <input
+                                        className="settings-input"
+                                        style={{ height: 32, fontSize: 12, flex: 1 }}
+                                        type="text"
+                                        spellCheck={false}
+                                        autoComplete="off"
+                                        placeholder="Paste the code from the sign-in page"
+                                        value={claudeLoginCode}
+                                        onChange={(e) => setClaudeLoginCode(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === "Enter") completeClaudeLogin(); }}
+                                        aria-label="Claude sign-in code"
+                                      />
+                                      <button
+                                        type="button"
+                                        className="settings-btn tap-press"
+                                        style={{ height: 32 }}
+                                        onClick={completeClaudeLogin}
+                                        disabled={claudeLoginBusy || !claudeLoginCode.trim()}
+                                      >
+                                        {claudeLoginBusy ? "Finishing…" : "Finish login"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="settings-btn tap-press"
+                                        style={{ height: 32 }}
+                                        onClick={() => { setClaudeLogin(null); setClaudeLoginCode(""); setClaudeLoginMsg(null); }}
+                                        disabled={claudeLoginBusy}
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                                {claudeLoginMsg && (
+                                  <div style={{ marginTop: 6, fontSize: 12, color: claudeLoginMsg.ok ? "var(--ok, #3fb950)" : "var(--err, #f85149)" }}>
+                                    {claudeLoginMsg.text}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             {/* Auth token — set the CLI's credential from here (no file edit). */}
                             <div className="settings-cli-subrow">
                               <input
