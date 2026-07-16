@@ -57,6 +57,9 @@ services:
         # into the image so the subscription "brains" work in the containerized core.
         # Auth is set at runtime in Settings (SPECTRE_ALLOW_CLI_UI=1), no rebuild.
         INSTALL_CLIS: "${INSTALL_CLIS:-0}"
+        # Git SHA the image is built from (set by scripts/spectre-update.mjs);
+        # the core reads it back to detect when origin/main has moved on.
+        SPECTRE_BUILD_SHA: "${SPECTRE_BUILD_SHA:-}"
     image: spectre-core:local
     env_file: [.env.docker]
     environment:

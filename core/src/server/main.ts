@@ -49,6 +49,7 @@ import { pdfs } from "./routes/pdfs";
 import { auth } from "./routes/auth";
 import { googleAuth } from "./routes/google-auth";
 import { permission } from "./routes/permission";
+import { update, startUpdateCheckLoop } from "./routes/update";
 
 const app = new Hono();
 
@@ -102,6 +103,15 @@ app.route("/api/pdfs", pdfs);
 app.route("/api/auth", auth);
 app.route("/api/auth", googleAuth);
 app.route("/api/permission", permission);
+app.route("/api/update", update);
+
+// Background update detector (6-hourly GitHub check → info monitor event).
+// Notify-only, fail-soft: a failure here must never stop the core booting.
+try {
+  startUpdateCheckLoop();
+} catch {
+  /* fail-soft */
+}
 
 const port = Number(process.env.PORT) || 8788;
 console.log(`[spectre-core/hono] listening on :${port}`);

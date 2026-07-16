@@ -34,6 +34,11 @@ RUN BUN_TARGET=bun-linux-x64; \
 # ---- runtime: binaries + prompt data only (no bun/node) ----
 FROM debian:bookworm-slim AS runner
 WORKDIR /app
+# The git SHA this image was built from (baked in by scripts/spectre-update.mjs
+# via --build-arg / the compose `args:` entry). The core's /api/update/status
+# compares it against origin/main to detect available updates. Empty = unknown.
+ARG SPECTRE_BUILD_SHA=
+ENV SPECTRE_BUILD_SHA=$SPECTRE_BUILD_SHA
 ENV PORT=8787 \
     HOSTNAME=0.0.0.0 \
     SPECTRE_REPO_PATH=/app \
