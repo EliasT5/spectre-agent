@@ -18,10 +18,12 @@ const MAX_LINE_LENGTH = 4096;
 
 /** [pattern, replacement label] pairs applied in order. */
 const REDACT_RULES: Array<[RegExp, string]> = [
-  // GitHub PATs / app tokens / refresh tokens
+  // GitHub PATs / app tokens / refresh / OAuth (device + user-to-server) tokens
   [/ghp_[A-Za-z0-9]{36,}/g,     '[GH_TOKEN]'],
   [/ghs_[A-Za-z0-9]{36,}/g,     '[GH_TOKEN]'],
   [/ghr_[A-Za-z0-9]{36,}/g,     '[GH_TOKEN]'],
+  [/gho_[A-Za-z0-9]{36,}/g,     '[GH_TOKEN]'],
+  [/ghu_[A-Za-z0-9]{36,}/g,     '[GH_TOKEN]'],
   [/gh_[A-Za-z0-9]{36,}/g,      '[GH_TOKEN]'],
   // OpenAI / Anthropic style keys
   [/sk-[A-Za-z0-9\-_]{40,}/g,   '[SK_KEY]'],

@@ -44,6 +44,7 @@ import { proactive } from "./routes/proactive";
 import { spectreMode } from "./routes/spectre-mode";
 import { shell } from "./routes/shell";
 import { workspace } from "./routes/workspace";
+import { wsagent } from "./routes/wsagent";
 import { pdfs } from "./routes/pdfs";
 import { auth } from "./routes/auth";
 import { googleAuth } from "./routes/google-auth";
@@ -94,6 +95,9 @@ app.route("/api/proactive", proactive);
 app.route("/api/spectre-mode", spectreMode);
 app.route("/api/shell", shell);
 app.route("/api/workspace", workspace);
+// Repo-aware agent proxy → isolated workspace-service, slot resolved from the
+// calling thread's binding (see routes/wsagent.ts). Drives the workspace.* MCP tools.
+app.route("/api/wsagent", wsagent);
 app.route("/api/pdfs", pdfs);
 app.route("/api/auth", auth);
 app.route("/api/auth", googleAuth);

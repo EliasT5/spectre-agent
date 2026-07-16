@@ -471,6 +471,26 @@ threads.post("/:threadId/run", async (c) => {
     typeof (thread?.metadata as { channel?: unknown } | null)?.channel === "string"
       ? (thread!.metadata as { channel: string }).channel
       : null;
+
+  // Workspace chats (bound to a repo slot via metadata.kind==="workspace") get a
+  // block telling the brain to act through the confined workspace.* tools.
+  const buildWorkspaceBlock = (meta: unknown): string => {
+    const m = (meta ?? {}) as { kind?: string; repo?: string };
+    if (m.kind !== "workspace") return "";
+    const repo = m.repo || "the repository";
+    return (
+      `\n\n# Workspace\n\nThis chat is attached to the GitHub repo **${repo}**, checked out in an ` +
+      `isolated sandbox. Work ONLY through the workspace tools — they are confined to this repo:\n` +
+      `- \`mcp__spectre__workspace_listDir\` / \`mcp__spectre__workspace_readFile\` — explore + read files.\n` +
+      `- \`mcp__spectre__workspace_writeFile\` — create/edit files (the user approves each write).\n` +
+      `- \`mcp__spectre__workspace_exec\` — run commands in the repo (approved per run).\n` +
+      `- \`mcp__spectre__workspace_clone\` — clone ANOTHER repo into a \`tmp\` scratch dir for reference; ` +
+      `read those files by passing \`root: "tmp"\`.\n` +
+      `Paths are relative to the repo root. Prefer these over the host bash/write tools (which run ` +
+      `OUTSIDE this repo). To open a pull request, tell the user to click "Finalize + PR" in the Workspaces tab.`
+    );
+  };
+
   const hasRetrieved = recalled.length > 0 || crossThreadHits.length > 0 || pdf.docs.length > 0;
   const stablePrompt = buildSystemPrompt();
   const systemPrompt =
@@ -480,6 +500,7 @@ threads.post("/:threadId/run", async (c) => {
     buildCrossThreadBlock(crossThreadHits) +
     buildPdfContextHeader(pdf.docs, pdf.hits) +
     (rolling ? `\n\n# Earlier in this thread (compacted)\n\n${rolling.text}` : "") +
+    buildWorkspaceBlock(thread?.metadata) +
     buildUntrustedInputBlock(channelName, hasRetrieved);
   await detectProviders();
   const { model } = route(userContent, requestedHint || thread?.model_hint || defaultModel);

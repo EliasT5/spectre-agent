@@ -425,6 +425,142 @@ async function requireApproval(tool, input) {
   return decision;
 }
 
+/* ─────────────────── workspace.* repo-aware tools ──────────────────────
+ * Read/write/exec/clone confined to THIS chat's bound Workspace slot. Routed
+ * broker → core /api/wsagent → isolated workspace-service (:8010). The core
+ * resolves the slot from this thread's binding (we only ever send THREAD_ID, not
+ * a tool arg), so the brain can't reach another slot, and all ops run in the
+ * untrusted-code sandbox behind its path-guard. Only usable in a Workspaces chat.
+ */
+async function wsFetch(path, opts = {}) {
+  const res = await fetch(`${APP_URL}/api/wsagent${path}`, {
+    ...opts,
+    headers: { ...authHeaders(opts), "x-spectre-thread-id": THREAD_ID || "" },
+  });
+  const text = await res.text();
+  return { ok: res.ok, status: res.status, text };
+}
+async function wsJson(path, opts = {}) {
+  const { ok, status, text } = await wsFetch(path, opts);
+  const data = text ? safeJson(text) : null;
+  if (!ok) throw new Error(data?.error || text || `HTTP ${status}`);
+  return data;
+}
+
+server.registerTool(
+  "workspace.listDir",
+  {
+    description:
+      "List files in THIS Workspace chat's repo (or its tmp scratch dir). Workspace chats only.",
+    inputSchema: { root: z.enum(["repo", "tmp"]).optional().describe("repo (default) or tmp") },
+  },
+  async ({ root }) => {
+    try {
+      const data = await wsJson(`/tree${root === "tmp" ? "?root=tmp" : ""}`);
+      const files = (data?.files || []).map((f) => `${f.is_dir ? "d" : "-"} ${f.path}`).join("\n");
+      return { content: [{ type: "text", text: files || "(empty)" }] };
+    } catch (err) {
+      return toolErr("workspace.listDir", err);
+    }
+  },
+);
+
+server.registerTool(
+  "workspace.readFile",
+  {
+    description:
+      "Read a file from THIS Workspace chat's repo (or tmp). Path is relative to the root. Workspace chats only.",
+    inputSchema: {
+      path: z.string().describe("path relative to the repo/tmp root"),
+      root: z.enum(["repo", "tmp"]).optional(),
+    },
+  },
+  async ({ path, root }) => {
+    try {
+      const q = new URLSearchParams({ path });
+      if (root === "tmp") q.set("root", "tmp");
+      const { ok, status, text } = await wsFetch(`/file?${q.toString()}`);
+      if (!ok) throw new Error(safeJson(text)?.error || text || `HTTP ${status}`);
+      return { content: [{ type: "text", text: text || "(empty file)" }] };
+    } catch (err) {
+      return toolErr("workspace.readFile", err);
+    }
+  },
+);
+
+server.registerTool(
+  "workspace.writeFile",
+  {
+    description:
+      "Write/overwrite a file in THIS Workspace chat's repo (or tmp). Requires approval. Workspace chats only.",
+    inputSchema: {
+      path: z.string(),
+      content: z.string(),
+      root: z.enum(["repo", "tmp"]).optional(),
+    },
+  },
+  async ({ path, content, root }) => {
+    try {
+      await requireApproval("mcp__spectre__workspace_writeFile", {
+        path,
+        root: root || "repo",
+        size: content.length,
+        preview: content.length > 200 ? content.slice(0, 200) + "…" : content,
+      });
+      const q = new URLSearchParams({ path });
+      if (root === "tmp") q.set("root", "tmp");
+      await wsJson(`/file?${q.toString()}`, {
+        method: "PUT",
+        headers: { "Content-Type": "text/plain" },
+        body: content,
+      });
+      return { content: [{ type: "text", text: `Wrote ${content.length} bytes to ${path}` }] };
+    } catch (err) {
+      return toolErr("workspace.writeFile", err);
+    }
+  },
+);
+
+server.registerTool(
+  "workspace.exec",
+  {
+    description:
+      "Run a shell command inside THIS Workspace chat's repo (or tmp), confined to that dir. Requires approval. Workspace chats only.",
+    inputSchema: { cmd: z.string(), root: z.enum(["repo", "tmp"]).optional() },
+  },
+  async ({ cmd, root }) => {
+    try {
+      await requireApproval("mcp__spectre__workspace_exec", { cmd, root: root || "repo" });
+      const data = await wsJson(`/exec${root === "tmp" ? "?root=tmp" : ""}`, {
+        method: "POST",
+        body: JSON.stringify({ cmd }),
+      });
+      const out = `exit ${data.code}\n${data.stdout || ""}${data.stderr ? `\n[stderr]\n${data.stderr}` : ""}`;
+      return { content: [{ type: "text", text: out.slice(0, 12000) }] };
+    } catch (err) {
+      return toolErr("workspace.exec", err);
+    }
+  },
+);
+
+server.registerTool(
+  "workspace.clone",
+  {
+    description:
+      'Clone ANOTHER GitHub repo into this Workspace chat\'s tmp scratch dir for reference (read it back with root="tmp"). Requires approval. Workspace chats only.',
+    inputSchema: { repo: z.string().describe("owner/name or GitHub URL") },
+  },
+  async ({ repo }) => {
+    try {
+      await requireApproval("mcp__spectre__workspace_clone", { repo });
+      const data = await wsJson(`/clone`, { method: "POST", body: JSON.stringify({ repo }) });
+      return { content: [{ type: "text", text: `Cloned into tmp/${data.path} — read it with root="tmp".` }] };
+    } catch (err) {
+      return toolErr("workspace.clone", err);
+    }
+  },
+);
+
 /* ───────────────────────── autonomy quota gate ─────────────────────── */
 //
 // During a bounded PROACTIVE run the brain has a read-mostly whitelist of

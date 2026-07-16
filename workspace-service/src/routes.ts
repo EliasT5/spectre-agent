@@ -21,7 +21,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { readFile, writeFile } from "node:fs/promises";
-import { readdirSync, statSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { readdirSync, statSync, rmSync, existsSync, readFileSync, mkdirSync, realpathSync } from "node:fs";
 import { join, relative, isAbsolute, normalize, sep } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
@@ -42,7 +42,7 @@ import {
   WORKSPACE_ROOT,
 } from "./lib/path-guard.js";
 import { runCommand, safeSpawn } from "./lib/safe-spawn.js";
-import { formatSSEEvent } from "./lib/sse-redact.js";
+import { formatSSEEvent, redactLine } from "./lib/sse-redact.js";
 
 export const workspace = new Hono();
 
@@ -85,6 +85,39 @@ async function resolve(
     const status: 404 | 400 = /unknown slot/i.test(msg) ? 404 : 400;
     return { error: msg, status };
   }
+}
+
+/**
+ * Resolve a slot to a working root, honoring an optional `root` selector used by
+ * the repo-aware agent tools:
+ *   - "repo" (default) → the slot's clone (or the trusted folder) — same as resolve().
+ *   - "tmp"            → a sandbox-only scratch dir <WORKSPACE_ROOT>/<id>/tmp,
+ *                        created on demand, where the agent may clone OTHER repos
+ *                        for reference. Trusted folders have no tmp.
+ * guardPath()/safeSpawn confine every downstream op to whichever root is returned.
+ */
+async function resolveSel(
+  id: string,
+  root: string | undefined,
+): Promise<{ resolved: ResolvedRoot } | { error: string; status: 404 | 400 }> {
+  if (root === "tmp") {
+    const meta = getSlot(id);
+    if (!meta) return { error: "tmp is only available for sandbox slots", status: 404 };
+    const tmpDir = join(WORKSPACE_ROOT, id, "tmp");
+    try {
+      mkdirSync(tmpDir, { recursive: true });
+      return { resolved: { root: realpathSync(tmpDir), kind: "sandbox", meta } };
+    } catch (err) {
+      return { error: `tmp unavailable: ${(err as Error).message}`, status: 400 };
+    }
+  }
+  return resolve(id);
+}
+
+/** Per-line secret redaction for buffered command output before it reaches the model. */
+function redactOutput(s: string, cap = 8000): string {
+  const red = s.split("\n").map(redactLine).join("\n");
+  return red.length > cap ? red.slice(-cap) : red;
 }
 
 /**
@@ -326,7 +359,7 @@ function walk(root: string, dir: string, out: TreeEntry[], budget = 5000): void 
 
 workspace.get("/:id/tree", async (c) => {
   const id = c.req.param("id");
-  const r = await resolve(id);
+  const r = await resolveSel(id, c.req.query("root"));
   if ("error" in r) return c.json({ error: r.error }, r.status);
   const repoDir = r.resolved.root;
   const out: TreeEntry[] = [];
@@ -348,7 +381,7 @@ workspace.get("/:id/file", async (c) => {
   const relPath = c.req.query("path");
   if (!relPath) return c.json({ error: "Missing ?path=" }, 400);
 
-  const r = await resolve(id);
+  const r = await resolveSel(id, c.req.query("root"));
   if ("error" in r) return c.json({ error: r.error }, r.status);
 
   let abs: string;
@@ -398,7 +431,7 @@ workspace.put("/:id/file", async (c) => {
     return c.json({ error: "File too large (>2 MB)" }, 413);
   }
 
-  const r = await resolve(id);
+  const r = await resolveSel(id, c.req.query("root"));
   if ("error" in r) return c.json({ error: r.error }, r.status);
 
   let abs: string;
@@ -414,6 +447,84 @@ workspace.put("/:id/file", async (c) => {
     return c.json({ error: `Write failed: ${(err as Error).message}` }, 500);
   }
   return c.json({ ok: true });
+});
+
+// ── Repo-aware agent: buffered exec + clone-into-tmp ────────────────────────
+// The brain drives these via the MCP broker → core proxy. Unlike /:id/shell
+// (SSE, for the editor terminal), /:id/exec returns a BUFFERED JSON result the
+// tool can hand straight back to the model. `?root=tmp` runs in the scratch dir.
+workspace.post("/:id/exec", async (c) => {
+  const id = c.req.param("id");
+  const r = await resolveSel(id, c.req.query("root"));
+  if ("error" in r) return c.json({ error: r.error }, r.status);
+  if (r.resolved.kind === "sandbox" && r.resolved.meta.status !== "ready") {
+    return c.json({ error: `Slot is ${r.resolved.meta.status}` }, 409);
+  }
+  let body: { cmd?: unknown };
+  try {
+    body = (await c.req.json()) as { cmd?: unknown };
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  if (typeof body.cmd !== "string" || !body.cmd.trim()) {
+    return c.json({ error: "cmd must be a non-empty string" }, 400);
+  }
+  const cmd = body.cmd.trim();
+  if (TRAVERSAL_RE.test(cmd)) {
+    return c.json(
+      { error: "Commands containing 'cd /' or 'cd ..' are not allowed (path-traversal prevention)." },
+      400,
+    );
+  }
+  const res = await runCommand("bash", ["-lc", cmd], {
+    cwd: r.resolved.root,
+    timeout: 120_000,
+    ghToken: ghToken(),
+  });
+  return c.json({
+    code: res.code,
+    stdout: redactOutput(res.stdout),
+    stderr: redactOutput(res.stderr, 4000),
+  });
+});
+
+// Clone ANOTHER repo into this slot's scratch dir (<id>/tmp/<name>) for reference.
+// Cleaned up when the slot is discarded/finalized (deleteSlot wipes the whole dir);
+// a daily background prune is on the backlog.
+workspace.post("/:id/clone", async (c) => {
+  const id = c.req.param("id");
+  const meta = getSlot(id);
+  if (!meta) return c.json({ error: "clone is only available for sandbox slots" }, 404);
+  let body: { repo?: unknown };
+  try {
+    body = (await c.req.json()) as { repo?: unknown };
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const repoRaw = body.repo;
+  if (typeof repoRaw !== "string" || repoRaw.length < 3 || repoRaw.length > 256) {
+    return c.json({ error: "'repo' must be a 3-256 char string (owner/name or GitHub URL)" }, 400);
+  }
+  const repo = parseRepo(repoRaw);
+  if (!repo) {
+    return c.json({ error: `Couldn't parse repo "${repoRaw}" — use "owner/name" or a GitHub URL.` }, 400);
+  }
+  const tmpDir = join(WORKSPACE_ROOT, id, "tmp");
+  mkdirSync(tmpDir, { recursive: true });
+  const dest = join(tmpDir, repo.name);
+  if (existsSync(dest)) {
+    return c.json({ error: `'${repo.name}' is already cloned in tmp — remove it first` }, 409);
+  }
+  const res = await runCommand(
+    "gh",
+    ["repo", "clone", `${repo.owner}/${repo.name}`, dest, "--", "--depth=1"],
+    { cwd: tmpDir, timeout: 120_000, ghToken: ghToken() },
+  );
+  if (res.code !== 0) {
+    return c.json({ error: `gh clone failed (exit ${res.code})`, stderr_tail: tail(res.stderr) }, 500);
+  }
+  // Path is relative to the tmp root — use with `root=tmp` on the file/exec tools.
+  return c.json({ ok: true, path: repo.name }, 200);
 });
 
 type DiffStatus = "M" | "A" | "D" | "U";
