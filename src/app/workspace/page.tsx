@@ -12,6 +12,7 @@ import {
   Maximize2,
   Minimize2,
   Plus,
+  Recycle,
   Trash2,
   X,
 } from "lucide-react";
@@ -43,6 +44,13 @@ interface Slot {
   status: string;
   repo_url?: string | null;
   pr_url?: string | null;
+}
+
+/** A chat from a closed slot, tagged lifecycle=recycling, awaiting distillation. */
+interface RecyclingChat {
+  id: string;
+  title: string | null;
+  metadata?: { repo?: string; slot_id?: string } | null;
 }
 
 export default function WorkspaceTab() {
@@ -91,6 +99,19 @@ export default function WorkspaceTab() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // "To be recycled": chats from closed (finalized/discarded) slots, tagged
+  // lifecycle=recycling, awaiting the background distiller. Read-only here.
+  const [recycling, setRecycling] = useState<RecyclingChat[]>([]);
+  const loadRecycling = useCallback(async () => {
+    try {
+      const rows = await call<RecyclingChat[]>("/threads?lifecycle=recycling");
+      setRecycling(Array.isArray(rows) ? rows : []);
+    } catch {
+      /* leave as-is */
+    }
+  }, []);
+  useEffect(() => { void loadRecycling(); }, [loadRecycling]);
+
   async function openRepo() {
     if (!repo.trim()) return;
     setBusy(true);
@@ -115,8 +136,11 @@ export default function WorkspaceTab() {
     setBusy(true);
     try {
       await call(`/workspace/${s.id}`, { method: "DELETE" });
+      // The slot's chats outlive the slot dir — recycle them (distill later).
+      await call(`/threads/recycle`, { method: "POST", body: JSON.stringify({ slot_id: s.id }) }).catch(() => {});
       if (sel?.id === s.id) setSel(null);
       await load();
+      void loadRecycling();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -136,8 +160,13 @@ export default function WorkspaceTab() {
         body: JSON.stringify(body),
       });
       if (r.pr_url) setLastPrUrl(r.pr_url);
+      // Sandbox slots are wiped on finalize — move their chats to "to be recycled".
+      if (s.kind === "sandbox") {
+        await call(`/threads/recycle`, { method: "POST", body: JSON.stringify({ slot_id: s.id }) }).catch(() => {});
+      }
       setSel(null);
       await load();
+      void loadRecycling();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -336,6 +365,27 @@ export default function WorkspaceTab() {
                 </div>
               )}
             </>
+          )}
+
+          {recycling.length > 0 && (
+            <div className="ws-recycle">
+              <div className="ws-recycle-head">
+                <Recycle size={13} />
+                <span>To be recycled</span>
+                <span className="ws-recycle-count">{recycling.length}</span>
+              </div>
+              <p className="ws-recycle-note">
+                Chats from closed workspaces, queued to be distilled into memory.
+              </p>
+              <ul className="ws-recycle-list">
+                {recycling.map((t) => (
+                  <li key={t.id} className="ws-recycle-item">
+                    <span className="ws-recycle-title">{t.title?.trim() || "Chat"}</span>
+                    {t.metadata?.repo && <span className="ws-recycle-repo">{t.metadata.repo}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       </div>

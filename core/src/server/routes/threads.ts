@@ -59,13 +59,18 @@ threads.get("/", async (c) => {
   // metadata.slot_id). By default the recycled ones are hidden; ?lifecycle=recycling
   // returns just the "to be recycled" bucket for that slot.
   const slot = c.req.query("slot");
+  const lifecycle = c.req.query("lifecycle");
   if (slot) {
     query = query.eq("metadata->>slot_id", slot);
-    if (c.req.query("lifecycle") === "recycling") {
+    if (lifecycle === "recycling") {
       query = query.eq("metadata->>lifecycle", "recycling");
     } else {
       query = query.or("metadata->>lifecycle.is.null,metadata->>lifecycle.neq.recycling");
     }
+  } else if (lifecycle === "recycling") {
+    // Global "to be recycled" bucket: closed-workspace chats across all slots,
+    // awaiting distillation into memory.
+    query = query.eq("metadata->>lifecycle", "recycling");
   }
 
   const { data, error } = await query;
@@ -111,6 +116,35 @@ threads.post("/", async (c) => {
     return c.json({ error: error.message }, 500);
   }
   return c.json(data, 201);
+});
+
+// Flip a closed Workspace slot's chats to the "to be recycled" lifecycle — the
+// shell calls this after Close+PR (or discard). A background job later distills
+// them into long-term memory (see notes/backlog.md). Merges metadata; other keys
+// (slot_id, repo, kind) stay intact so the global recycling view can group them.
+threads.post("/recycle", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const slotId = typeof body.slot_id === "string" ? body.slot_id.trim() : "";
+  if (!slotId) return c.json({ error: "slot_id is required" }, 400);
+  const supabase = createServiceSupabase();
+  const { data: rows, error } = await supabase
+    .from("threads")
+    .select("id, metadata")
+    .eq("metadata->>slot_id", slotId);
+  if (error) return c.json({ error: error.message }, 500);
+  let recycled = 0;
+  for (const row of rows ?? []) {
+    const meta = {
+      ...((row as { metadata?: Record<string, unknown> }).metadata ?? {}),
+      lifecycle: "recycling",
+    };
+    const { error: upErr } = await supabase
+      .from("threads")
+      .update({ metadata: meta })
+      .eq("id", (row as { id: string }).id);
+    if (!upErr) recycled++;
+  }
+  return c.json({ ok: true, recycled });
 });
 
 threads.get("/search", async (c) => {

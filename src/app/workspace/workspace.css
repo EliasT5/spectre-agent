@@ -901,6 +901,44 @@
 .wschat .threadchat .messages-inner,
 .wschat .threadchat .composer { max-width: none; }
 
+/* ── "To be recycled" section (closed-workspace chats awaiting distillation) ── */
+.ws-recycle {
+  margin-top: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  background: var(--color-bg);
+}
+.ws-recycle-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.ws-recycle-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-faint);
+  background: var(--color-border);
+  border-radius: var(--pill);
+  padding: 1px 7px;
+}
+.ws-recycle-note { margin: 6px 0 8px; font-size: 11.5px; color: var(--ink-faint); }
+.ws-recycle-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.ws-recycle-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.02);
+}
+.ws-recycle-title { font-size: 12.5px; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-recycle-repo { margin-left: auto; flex: 0 0 auto; font-size: 10.5px; color: var(--ink-faint); font-family: var(--font-mono); }
+
 .ws-card-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
 .ws-fs-exit {
