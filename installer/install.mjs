@@ -97,7 +97,7 @@ async function checkPorts(ports) {
 // wired to read them). All other keys are OMITTED when empty so the file stays clean.
 const REQUIRED_ENV_KEYS = new Set([
   "CORE_TOKEN", "PIN_HASH", "SESSION_SECRET", "LITELLM_MASTER_KEY",
-  "SPECTRE_SERVICE_TOKEN", "WORKSPACE_SERVICE_TOKEN", "CODE_SERVER_PASSWORD",
+  "SPECTRE_SERVICE_TOKEN", "WORKSPACE_SERVICE_TOKEN", "UPDATER_TOKEN", "CODE_SERVER_PASSWORD",
   "COMPOSE_PROFILES", "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_URL",
   "SUPABASE_SERVICE_ROLE_KEY", "SHELL_BIND", "SHELL_PORT",
   "SPECTRE_LITELLM_MODEL",
@@ -134,7 +134,7 @@ const CONTRACT_KEYS = new Set([
   "CORE_TOKEN", "PIN_HASH", "SESSION_SECRET", "LITELLM_MASTER_KEY",
   "SPECTRE_LITELLM_MODEL", "SPECTRE_SERVICE_TOKEN",
   "SPECTRE_ALLOW_CLAUDE_CLI", "SPECTRE_ALLOW_CODEX_CLI", "SPECTRE_ALLOW_GEMINI_CLI", "SPECTRE_ALLOW_CLI_BACKENDS",
-  "WORKSPACE_SERVICE_TOKEN", "WORKSPACE_TRUSTED_DIRS", "CODE_SERVER_PASSWORD",
+  "WORKSPACE_SERVICE_TOKEN", "UPDATER_TOKEN", "WORKSPACE_TRUSTED_DIRS", "CODE_SERVER_PASSWORD",
   "GH_TOKEN", "COMPOSE_PROFILES",
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_ALLOWED_SENDER_IDS",
   "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN",
@@ -1338,6 +1338,16 @@ function manageComposeArgs(seed) {
   return [...envArgs, ...profileArgs];
 }
 
+/** The git SHA to stamp images with (baked as SPECTRE_BUILD_SHA so the running
+ *  core can detect when origin/main has moved on). Fail-soft to "". */
+function gitSha() {
+  try {
+    return execSync("git rev-parse HEAD", { cwd: ROOT, encoding: "utf8" }).trim();
+  } catch {
+    return "";
+  }
+}
+
 /** Rebuild the core from source (./core) and recreate the services that run it. */
 function updateCoreImage(seed) {
   console.log("");
@@ -1350,7 +1360,7 @@ function updateCoreImage(seed) {
     console.log(C.dim("   Rebuilding the brain from source + restarting it..."));
     // `core` carries the build: context; --build recompiles it and the runner
     // services reuse the freshly built spectre-core:local tag.
-    execSync([...base, "up", "-d", "--build", ...CORE_IMAGE_SERVICES].join(" "), { cwd: ROOT, stdio: "inherit" });
+    execSync([...base, "up", "-d", "--build", ...CORE_IMAGE_SERVICES].join(" "), { cwd: ROOT, stdio: "inherit", env: { ...process.env, SPECTRE_BUILD_SHA: gitSha() } });
     console.log(C.ok("\n  + core updated"));
   } catch (e) {
     console.log(C.err("\n  x core update failed -- ") + C.dim(String(e?.message || e).split("\n")[0]));
@@ -1371,7 +1381,7 @@ function updateShell(seed) {
   console.log(C.dim("    directly rebuilds whatever source is on disk now.)"));
   const base = ["docker", "compose", ...manageComposeArgs(seed)];
   try {
-    execSync([...base, "up", "-d", "--build", "shell"].join(" "), { cwd: ROOT, stdio: "inherit" });
+    execSync([...base, "up", "-d", "--build", "shell"].join(" "), { cwd: ROOT, stdio: "inherit", env: { ...process.env, SPECTRE_BUILD_SHA: gitSha() } });
     console.log(C.ok("\n  + shell updated"));
   } catch (e) {
     console.log(C.err("\n  x shell update failed -- ") + C.dim(String(e?.message || e).split("\n")[0]));
@@ -1524,6 +1534,7 @@ async function main() {
       LITELLM_MASTER_KEY: seed.LITELLM_MASTER_KEY || genHex(),
       SPECTRE_SERVICE_TOKEN: seed.SPECTRE_SERVICE_TOKEN || genHex(),
       WORKSPACE_SERVICE_TOKEN: seed.WORKSPACE_SERVICE_TOKEN || genHex(),
+      UPDATER_TOKEN: seed.UPDATER_TOKEN || genHex(),
       CODE_SERVER_PASSWORD: seed.CODE_SERVER_PASSWORD || genHex(16),
       GH_TOKEN: seed.GH_TOKEN ?? "",
       WORKSPACE_TRUSTED_DIRS: seed.WORKSPACE_TRUSTED_DIRS ?? "",
@@ -1711,11 +1722,16 @@ async function main() {
         (await ask("Trusted local folders (comma-sep absolute paths; Enter to skip)", seed.WORKSPACE_TRUSTED_DIRS)) || "";
     }
 
-    // Updating is `git pull && docker compose up -d --build` (the core builds
-    // from source now -- no registry poll, no auto-updater sidecar). A carried
-    // `update` profile from an older install is dropped cleanly below.
-    if (composeProfiles.includes("update")) {
-      composeProfiles = composeProfiles.split(",").filter((p) => p.trim() && p.trim() !== "update").join(",");
+    // One-click updates: the `update` profile runs the updater sidecar so the Shell
+    // can apply updates with a BUTTON (no terminal) — friendly for non-technical
+    // users. It needs a UI, so add it for `ui` installs and keep it out of headless
+    // (those update via `git pull && docker compose up -d --build` or the script).
+    // ⚠ The sidecar mounts the host Docker socket (host-root-equivalent) — documented
+    // in agent-install/README.md ("## Update"); it's internal-only + UPDATER_TOKEN-gated.
+    {
+      const parts = composeProfiles.split(",").map((p) => p.trim()).filter(Boolean);
+      const base = parts.filter((p) => p !== "update");
+      composeProfiles = (base.includes("ui") ? [...base, "update"] : base).join(",");
       v.COMPOSE_PROFILES = composeProfiles;
     }
 
@@ -1875,7 +1891,9 @@ async function main() {
     execSync(composeCmd, {
       cwd: ROOT,
       stdio: "inherit",
-      env: { ...process.env, COMPOSE_PROFILES: composeProfiles },
+      // SPECTRE_BUILD_SHA bakes the built commit into the core image (compose
+      // reads it via the core.build.args), so update detection works immediately.
+      env: { ...process.env, COMPOSE_PROFILES: composeProfiles, SPECTRE_BUILD_SHA: gitSha() },
     });
   } catch {
     console.log(C.err("\n  docker compose failed -- check the output above.\n"));

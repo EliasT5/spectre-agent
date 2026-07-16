@@ -16,4 +16,7 @@ COPY server.mjs /app/server.mjs
 ENV PORT=8020 REPO_DIR=/repo
 WORKDIR /repo
 EXPOSE 8020
+# The docker:cli base sets ENTRYPOINT ["docker"] — reset it so CMD runs node directly
+# (otherwise `node …` is parsed as the `docker node` swarm subcommand).
+ENTRYPOINT []
 CMD ["node", "/app/server.mjs"]

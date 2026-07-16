@@ -11,7 +11,10 @@
 # browser only ever talks to /api/*). One `.env.docker` (written by
 # `installer/install.mjs`) feeds every service. Ollama runs on the host
 # (host.docker.internal). The shell is the only front door; core stays loopback.
-# Update with: git pull && docker compose up -d --build
+# Update: the web UI's "Update now" button (updater sidecar, `update` profile) or
+# `node scripts/spectre-update.mjs --apply` — both bake SPECTRE_BUILD_SHA in for
+# version detection. Manual fallback: git pull && docker compose up -d --build.
+# See agent-install/README.md "## Update".
 name: spectre
 
 services:
