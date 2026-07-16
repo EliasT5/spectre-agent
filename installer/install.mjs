@@ -4,6 +4,13 @@
 //   node installer/install.mjs            # interactive install
 //   node installer/install.mjs --dry-run  # detect + show the plan, write nothing
 //   node installer/install.mjs --check    # just the environment report
+//
+//   # Fully unattended / AI-driven (no prompts -- flags + env + defaults):
+//   node installer/install.mjs --non-interactive --db=local --profile=standard \
+//        --brain=ollama:qwen2.5:7b-instruct --pull-model --pin-hash=<sha256 of the PIN>
+//   Aliases: --yes, or env SPECTRE_INSTALL_NONINTERACTIVE=1. Provider keys via
+//   SPECTRE_KEY_<PROVIDER> env (e.g. SPECTRE_KEY_ANTHROPIC). Full flag list +
+//   the chat-driven playbook: agent-install/README.md.
 //   node installer/install.mjs --uninstall          # stop containers + remove networks (keeps data)
 //   node installer/install.mjs --uninstall --purge  # also delete volumes + .env files (irreversible)
 //   node installer/install.mjs --uninstall --yes    # skip confirmation prompt (non-interactive)
@@ -35,6 +42,40 @@ import { chooseNarrator } from "./narrator.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
 const ENV_PATH = join(ROOT, ".env.docker");
+
+// ---- CLI flags + machine-readable markers (non-interactive / AI-driven) -----
+// A CLI can drive a fully unattended install with --non-interactive (alias --yes,
+// or env SPECTRE_INSTALL_NONINTERACTIVE=1) plus the flags below. Every answer the
+// wizard would ask for has a flag/env fallback and a documented default; see
+// agent-install/README.md for the full playbook.
+
+/** Parse argv into a flag map: --key=value -> "value"; bare --key -> true. */
+export function parseFlags(argv) {
+  const flags = {};
+  for (const a of argv) {
+    const m = /^--([^=]+)(?:=([\s\S]*))?$/.exec(a);
+    if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
+  }
+  return flags;
+}
+
+/** Emit a machine-readable success marker for one install step. Human-legible
+ *  too; the AI-CLI playbook keys progress off the `SPECTRE_STEP_OK:` prefix. */
+const stepOk = (name) => console.log(`SPECTRE_STEP_OK:${name}`);
+
+/** Tag for a deliberate, already-reported fatal (vs. an unexpected crash). */
+class FatalError extends Error {}
+
+/** Emit a machine-readable fatal marker, then abort the install non-zero. The
+ *  playbook treats ONLY a `SPECTRE_FATAL:` line (or a non-zero exit) as a real
+ *  failure -- the benign registry noise (e.g. "pull access denied for
+ *  spectre-core", a locally-built image, or a provider "unverified" note) is NOT
+ *  fatal. Throws rather than process.exit()-ing so the event loop drains cleanly
+ *  (a hard exit mid-async trips a libuv teardown assertion on Windows). */
+function fatal(msg) {
+  console.log(`SPECTRE_FATAL:${msg}`);
+  throw new FatalError(msg);
+}
 
 // ---- pure helpers (exported for tests) --------------------------------------
 
@@ -134,8 +175,8 @@ const CONTRACT_KEYS = new Set([
   "CORE_TOKEN", "PIN_HASH", "SESSION_SECRET", "LITELLM_MASTER_KEY",
   "SPECTRE_LITELLM_MODEL", "SPECTRE_SERVICE_TOKEN",
   "SPECTRE_ALLOW_CLAUDE_CLI", "SPECTRE_ALLOW_CODEX_CLI", "SPECTRE_ALLOW_GEMINI_CLI", "SPECTRE_ALLOW_CLI_BACKENDS",
-  "WORKSPACE_SERVICE_TOKEN", "UPDATER_TOKEN", "WORKSPACE_TRUSTED_DIRS", "CODE_SERVER_PASSWORD",
-  "GH_TOKEN", "COMPOSE_PROFILES",
+  "WORKSPACE_SERVICE_TOKEN", "UPDATER_TOKEN", "WORKSPACE_TRUSTED_DIRS", "SPECTRE_TRUSTED_MOUNT_1", "CODE_SERVER_PASSWORD",
+  "GH_TOKEN", "INSTALL_CLIS", "COMPOSE_PROFILES",
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_ALLOWED_SENDER_IDS",
   "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN",
   "WHATSAPP_APP_SECRET", "WHATSAPP_ALLOWED_SENDER_IDS",
@@ -167,9 +208,19 @@ export function buildEnv(v, seed = {}) {
     // optional GitHub token for clone/push/PR, and trusted local folders.
     WORKSPACE_SERVICE_TOKEN: v.WORKSPACE_SERVICE_TOKEN,
     WORKSPACE_TRUSTED_DIRS: v.WORKSPACE_TRUSTED_DIRS ?? "",
+    // A single trusted-folder bind mount ("<host path>:/trusted/<name>") the
+    // Workspaces IDE edits in place; consumed by docker-compose.yml's workspace +
+    // code-server services. Blank (the default) = an inert mount, no host path.
+    SPECTRE_TRUSTED_MOUNT_1: v.SPECTRE_TRUSTED_MOUNT_1 ?? "",
+    // Bake the Claude Code + Codex CLIs into the core image (adds ~1GB). Only set
+    // when the user opts into a subscription-CLI brain; the default local/API
+    // brain path leaves the image lean.
+    INSTALL_CLIS: v.INSTALL_CLIS ?? "",
     // code-server's own login (defense-in-depth behind the shell PIN -- the
     // editor is file edit + terminal on the mounted workspaces).
     CODE_SERVER_PASSWORD: v.CODE_SERVER_PASSWORD,
+    // Updater sidecar auth (compose `update` profile); host-Docker-socket-gated.
+    UPDATER_TOKEN: v.UPDATER_TOKEN ?? "",
     GH_TOKEN: v.GH_TOKEN ?? "",
     // Which compose profiles run (the chosen install profile). "" = headless
     // (core + channels + API, no shell); "ui" = + shell; "ui,workspace" = + IDE.
@@ -486,6 +537,34 @@ export function detectDocker() {
   const docker = detectBin("docker");
   const compose = tryCmd("docker compose version");
   return { docker, compose: compose ? { found: true, version: compose.split("\n")[0].trim() } : { found: false, version: null } };
+}
+
+/**
+ * Verify the Docker DAEMON is actually up (the CLI being on PATH is not enough --
+ * a stopped Docker Desktop / dead `docker.service` still answers `docker --version`
+ * but every build/pull/up then fails cryptically). `docker info` needs the daemon.
+ * When it's down, print an OS-specific recovery hint and (opts.wait) poll for it to
+ * come up, bounded. Returns true once the daemon answers, false on timeout.
+ */
+async function dockerDaemonReady(opts = {}) {
+  const probe = () => spawnCollect("docker", ["info", "--format", "{{.ServerVersion}}"]);
+  if ((await probe()).code === 0) return true;
+  if (!opts.wait) return false;
+
+  console.log(C.warn("\n  ! Docker is installed but its daemon isn't responding yet."));
+  if (process.platform === "win32" || process.platform === "darwin") {
+    console.log(C.dim("    Start Docker Desktop and wait for the whale icon to go steady."));
+  } else {
+    console.log(C.dim("    Start it with:  sudo systemctl start docker   (or launch Docker Desktop)"));
+  }
+  process.stdout.write(C.dim("    Waiting for the Docker daemon"));
+  for (let i = 0; i < 60; i++) { // ~2 min bounded wait
+    await sleep(2000);
+    process.stdout.write(C.dim("."));
+    if ((await probe()).code === 0) { process.stdout.write(C.ok(" up\n")); return true; }
+  }
+  process.stdout.write("\n");
+  return false;
 }
 
 export function detectConnectors() {
@@ -948,8 +1027,9 @@ async function testApiBrain(model, keyEnv, v) {
       return r.ok ? { ok: true, detail: "key accepted" } : { ok: false, detail: `provider returned HTTP ${r.status}` };
     }
     // Any other provider is fronted by the gateway; we can't cheaply validate its
-    // key here, so trust it's saved and let the first chat confirm it.
-    return { ok: true, detail: "key saved -- validated on your first chat via the gateway" };
+    // key here. Be HONEST -- don't claim a pass. Mark it unverified so the caller
+    // says so plainly; the real end-to-end chat check after bring-up confirms it.
+    return { ok: false, unverified: true, detail: "can't verify this provider's key here -- your first chat confirms it" };
   } catch (e) {
     return {
       ok: false,
@@ -1058,6 +1138,9 @@ async function setupBrainModel(rl, ask, v, chatModels, guide, dryRun) {
 
   if (result.ok) {
     console.log(C.ok("   + brain test passed") + C.dim(`  (${result.detail})`));
+  } else if (result.unverified) {
+    // Not a failure -- we just can't cheaply verify this provider here.
+    console.log(C.dim(`   i brain key saved -- ${result.detail}`));
   } else {
     console.log(C.warn(`   ! brain test did not pass -- ${result.detail}`));
     if (test.kind === "ollama") {
@@ -1511,6 +1594,292 @@ async function handleExistingInstall(rl, askRaw, seed) {
   return true;
 }
 
+// ---- non-interactive (AI-driven) resolution ---------------------------------
+
+/** Resolve provider API keys into v from: scanned (shell env + prior install),
+ *  then explicit SPECTRE_KEY_<PROVIDER> env overrides (the AI-driven seam -- the
+ *  CLI sets these before launch so no key is ever typed at a prompt). */
+function resolveProviderKeys(scan, v) {
+  for (const k of scan?.keys ?? []) v[k.envVar] = k.value;
+  for (const p of API_PROVIDERS) {
+    const explicit = process.env[`SPECTRE_KEY_${p.id.toUpperCase()}`];
+    if (explicit) v[p.envVars[0]] = explicit;
+  }
+}
+
+/** Map a --brain flag to a brain spec. Forms: "ollama:<model>", "api:<model>",
+ *  or a bare model (treated as ollama). Default: the first installed chat model,
+ *  else the recommended small pull. */
+export function resolveBrainFlag(raw, chatModels) {
+  const fallback = `ollama:${chatModels[0] || RECOMMENDED_PULL}`;
+  const spec = String(raw && raw !== true ? raw : fallback);
+  if (spec.startsWith("api:")) return { kind: "api", model: spec.slice(4) };
+  const model = spec.startsWith("ollama:") ? spec.slice(7) : spec;
+  return { kind: "ollama", model: model || RECOMMENDED_PULL };
+}
+
+/**
+ * Assemble the full config (v + profile + db choice) from flags/env/defaults for
+ * a fully unattended install -- the parallel of the interactive wizard branch.
+ * Runs the same real side effects the wizard does inline: generate the local-db
+ * keys, pull the Ollama brain (when --pull-model), and write spectre-default into
+ * litellm-config.yaml. No prompts, no readline. Returns everything main() needs.
+ */
+async function resolveNonInteractive({ flags, seed, scan, chatModels, firstInstall }) {
+  const v = {};
+  const has = (name) => name in flags && flags[name] !== "false" && flags[name] !== "0";
+  const val = (name, def) => (flags[name] !== undefined && flags[name] !== true ? String(flags[name]) : def);
+
+  console.log(C.b("\n  Non-interactive install") + C.dim("  (flags + env + defaults; no prompts)\n"));
+
+  // --- PIN (validated FIRST, before any file side effects) ------------------
+  // The AI never sees the raw PIN -- only a --pin-hash it collected from the user.
+  const pinHashVal = val("pin-hash", process.env.SPECTRE_PIN_HASH || "");
+  if (pinHashVal) {
+    if (!/^[0-9a-f]{64}$/i.test(pinHashVal)) fatal("--pin-hash must be a 64-char sha256 hex digest of the user's PIN.");
+    v.PIN_HASH = pinHashVal.toLowerCase();
+  } else if (seed.PIN_HASH) {
+    v.PIN_HASH = seed.PIN_HASH; // re-run: keep the existing PIN
+  } else {
+    fatal(
+      "no PIN configured. Pass --pin-hash=<sha256 of the user's PIN>. Have the USER produce it " +
+      "privately (so the AI never sees it) with:  node -e \"process.stdout.write(require('node:crypto').createHash('sha256').update(String(process.argv[1])).digest('hex')+'\\n')\" <PIN>",
+    );
+  }
+
+  // --- database -------------------------------------------------------------
+  let useLocalDb = String(val("db", "local")).toLowerCase() !== "cloud";
+  if (!useLocalDb) {
+    const url = val("supabase-url", process.env.SUPABASE_URL || seed.NEXT_PUBLIC_SUPABASE_URL || "");
+    const skey = val("supabase-service-key", process.env.SUPABASE_SERVICE_ROLE_KEY || seed.SUPABASE_SERVICE_ROLE_KEY || "");
+    if (!url || !skey) {
+      console.log(C.warn("  ! --db=cloud needs --supabase-url and --supabase-service-key -- using the bundled Local DB instead."));
+      useLocalDb = true;
+    } else {
+      console.log(C.warn("  ! Cloud DB selected. The schema (supabase/_apply_all.sql) is a MANUAL one-time"));
+      console.log(C.warn("    paste in the Supabase SQL editor -- the unattended path can't do it for you."));
+      console.log(C.warn("    Local DB is the supported fully-automated default."));
+      v.NEXT_PUBLIC_SUPABASE_URL = url;
+      v.SUPABASE_URL = url;
+      v.SUPABASE_SERVICE_ROLE_KEY = skey;
+    }
+  }
+  if (useLocalDb) {
+    const { genLocalDbEnv } = await import("./gen-supabase-keys.mjs");
+    const keys = genLocalDbEnv();
+    v.NEXT_PUBLIC_SUPABASE_URL = "http://localhost:8000";
+    v.SUPABASE_URL = "http://host.docker.internal:8000";
+    v.SUPABASE_SERVICE_ROLE_KEY = keys.SERVICE_ROLE_KEY;
+    console.log(C.ok("  + local database keys generated") + C.dim(" (local-db/.env)"));
+  }
+  stepOk("database");
+
+  // --- profile --------------------------------------------------------------
+  const profChoice = String(val("profile", "standard")).toLowerCase();
+  const profile = ["headless", "standard", "full"].includes(profChoice) ? profChoice : "standard";
+  let composeProfiles = PROFILES[profile].profiles;
+  console.log(C.ok(`  + profile: ${PROFILES[profile].label}`));
+
+  // --- provider keys + brain ------------------------------------------------
+  resolveProviderKeys(scan, v);
+  const brain = resolveBrainFlag(flags.brain, chatModels);
+  let spec, brainTest;
+  if (brain.kind === "api") {
+    const keyEnv = val("brain-key-env", brainKeyEnv(brain.model));
+    if (!v[keyEnv] && process.env[keyEnv]) v[keyEnv] = process.env[keyEnv];
+    spec = { model: brain.model, api_key_env: keyEnv };
+    brainTest = { kind: "api", model: brain.model, keyEnv };
+    if (!v[keyEnv]) console.log(C.warn(`  ! brain ${brain.model} has no key in ${keyEnv} -- set SPECTRE_KEY_* / ${keyEnv} or chat will fail.`));
+  } else {
+    if (has("pull-model")) {
+      if (detectBin("ollama").found) {
+        console.log(C.dim(`  Pulling Ollama model ${brain.model} (first time can take a few minutes)...`));
+        try { execSync(`ollama pull ${brain.model}`, { stdio: "inherit" }); }
+        catch { console.log(C.warn(`  ! ollama pull ${brain.model} failed -- pull it later; chat uses it on next start.`)); }
+      } else {
+        console.log(C.warn("  ! --pull-model set but Ollama isn't installed (https://ollama.com/download)."));
+      }
+    }
+    spec = { model: `ollama_chat/${brain.model}`, api_base: "http://host.docker.internal:11434" };
+    brainTest = { kind: "ollama", name: brain.model };
+  }
+  v.SPECTRE_LITELLM_MODEL = "spectre-default";
+  setBrainModelYaml(spec);
+  console.log(C.ok(`  + brain model: ${spec.model}`) + C.dim("  (litellm-config.yaml - spectre-default)"));
+  // Day-to-day local models (dream/learn + embeddings): flags override defaults.
+  if (flags["learn-model"] && flags["learn-model"] !== true) v.OLLAMA_LEARN_MODEL = v.OLLAMA_DISTILL_MODEL = String(flags["learn-model"]);
+  if (flags["embed-model"] && flags["embed-model"] !== true) v.OLLAMA_EMBED_MODEL = String(flags["embed-model"]);
+  stepOk("brain");
+
+  // --- CLI subscription brains (opt-in; bake the CLIs only when chosen) ------
+  let wantClaude = false;
+  let installClis = false;
+  if (has("enable-claude-cli")) {
+    v.SPECTRE_ALLOW_CLAUDE_CLI = "1"; wantClaude = true; installClis = true;
+    const tok = val("claude-oauth-token", process.env.CLAUDE_CODE_OAUTH_TOKEN || seed.CLAUDE_CODE_OAUTH_TOKEN || "");
+    if (tok) v.CLAUDE_CODE_OAUTH_TOKEN = tok;
+  }
+  if (has("enable-codex-cli")) { v.SPECTRE_ALLOW_CODEX_CLI = "1"; installClis = true; }
+  if (has("enable-gemini-cli")) { v.SPECTRE_ALLOW_GEMINI_CLI = "1"; }
+  if (installClis) { v.INSTALL_CLIS = "1"; console.log(C.dim("  i CLI brain(s) enabled -- core image will bundle the CLIs (+~1GB).")); }
+
+  // --- messaging channels (default-deny; blank = off) -----------------------
+  const chanVal = (flag, envName, seedName) => val(flag, process.env[envName] || seed[seedName] || "");
+  const tg = chanVal("telegram-token", "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN");
+  if (tg) {
+    v.TELEGRAM_BOT_TOKEN = tg;
+    v.TELEGRAM_WEBHOOK_SECRET = seed.TELEGRAM_WEBHOOK_SECRET || genHex(16);
+    v.TELEGRAM_ALLOWED_SENDER_IDS = val("telegram-allowed-ids", seed.TELEGRAM_ALLOWED_SENDER_IDS || "");
+  }
+  const wa = chanVal("whatsapp-token", "WHATSAPP_TOKEN", "WHATSAPP_TOKEN");
+  if (wa) {
+    v.WHATSAPP_TOKEN = wa;
+    v.WHATSAPP_PHONE_NUMBER_ID = val("whatsapp-phone-id", process.env.WHATSAPP_PHONE_NUMBER_ID || seed.WHATSAPP_PHONE_NUMBER_ID || "");
+    v.WHATSAPP_VERIFY_TOKEN = seed.WHATSAPP_VERIFY_TOKEN || genHex(16);
+    v.WHATSAPP_APP_SECRET = val("whatsapp-app-secret", process.env.WHATSAPP_APP_SECRET || seed.WHATSAPP_APP_SECRET || "");
+    v.WHATSAPP_ALLOWED_SENDER_IDS = val("whatsapp-allowed-ids", seed.WHATSAPP_ALLOWED_SENDER_IDS || "");
+  }
+  const dc = chanVal("discord-token", "DISCORD_BOT_TOKEN", "DISCORD_BOT_TOKEN");
+  if (dc) {
+    v.DISCORD_BOT_TOKEN = dc;
+    v.DISCORD_ALLOWED_SENDER_IDS = val("discord-allowed-ids", seed.DISCORD_ALLOWED_SENDER_IDS || "");
+  }
+
+  // --- secrets (generated once; carried across re-runs) ---------------------
+  v.CORE_TOKEN = seed.CORE_TOKEN || genHex();
+  v.SESSION_SECRET = seed.SESSION_SECRET || genHex();
+  v.LITELLM_MASTER_KEY = seed.LITELLM_MASTER_KEY || genHex();
+  v.SPECTRE_SERVICE_TOKEN = seed.SPECTRE_SERVICE_TOKEN || genHex();
+  v.WORKSPACE_SERVICE_TOKEN = seed.WORKSPACE_SERVICE_TOKEN || genHex();
+  v.UPDATER_TOKEN = seed.UPDATER_TOKEN || genHex();
+  v.CODE_SERVER_PASSWORD = seed.CODE_SERVER_PASSWORD || genHex(16);
+
+  // --- workspace + networking ----------------------------------------------
+  v.GH_TOKEN = val("gh-token", process.env.GH_TOKEN || seed.GH_TOKEN || "");
+  const trustedRaw = val("trusted-dirs", "");
+  if (trustedRaw) {
+    // Expose the FIRST host path read/write at /trusted/<basename> (compose's
+    // single SPECTRE_TRUSTED_MOUNT_1); the service allowlists it via TRUSTED_DIRS.
+    const first = trustedRaw.split(",").map((s) => s.trim()).filter(Boolean)[0];
+    if (first) {
+      const name = (first.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "dir").replace(/[^A-Za-z0-9_.-]/g, "_");
+      v.SPECTRE_TRUSTED_MOUNT_1 = `${first}:/trusted/${name}`;
+      v.WORKSPACE_TRUSTED_DIRS = `/trusted/${name}`;
+      console.log(C.dim(`  i trusted folder: ${first} -> /trusted/${name}`));
+    }
+  } else if (seed.WORKSPACE_TRUSTED_DIRS) {
+    v.WORKSPACE_TRUSTED_DIRS = seed.WORKSPACE_TRUSTED_DIRS;
+    v.SPECTRE_TRUSTED_MOUNT_1 = seed.SPECTRE_TRUSTED_MOUNT_1 ?? "";
+  }
+  v.SHELL_PORT = val("shell-port", seed.SHELL_PORT || "3100");
+  v.SHELL_BIND = val("bind", seed.SHELL_BIND || "127.0.0.1");
+
+  // One-click updates: add the `update` profile for UI installs (matches the wizard).
+  {
+    const parts = composeProfiles.split(",").map((p) => p.trim()).filter(Boolean);
+    const base = parts.filter((p) => p !== "update");
+    composeProfiles = (base.includes("ui") ? [...base, "update"] : base).join(",");
+  }
+  v.COMPOSE_PROFILES = composeProfiles;
+  stepOk("configure");
+
+  return {
+    v, composeProfiles, profile, useLocalDb, wantClaude, brainTest,
+    noTailscale: has("no-tailscale"),
+    noBootService: has("no-boot-service"),
+  };
+}
+
+// ---- verification gates -----------------------------------------------------
+
+/** `docker compose ... ps` parsed to a running/not-running verdict. Tolerates
+ *  both the JSON-array and NDJSON `--format json` shapes across compose versions. */
+async function composePsRunning(composeArgv) {
+  const res = await spawnCollect("docker", ["compose", ...composeArgv, "ps", "--format", "json"], { cwd: ROOT });
+  if (res.code !== 0) return { ok: false, items: [], notUp: [], detail: (res.stderr || "compose ps failed").split("\n")[0] };
+  let items = [];
+  try {
+    const p = JSON.parse(res.stdout);
+    items = Array.isArray(p) ? p : [p];
+  } catch {
+    for (const l of res.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
+      try { items.push(JSON.parse(l)); } catch { /* skip partial */ }
+    }
+  }
+  const notUp = items.filter((s) => !/running|^up\b|healthy/i.test(String(s.State || s.Status || "")));
+  return { ok: items.length > 0 && notUp.length === 0, items, notUp };
+}
+
+/**
+ * Send ONE real chat completion through the running stack -- straight at the
+ * LiteLLM gateway (127.0.0.1:4000), the exact path the core uses, requesting the
+ * friendly `spectre-default` model. This is the honest end-to-end proof that chat
+ * works before we declare success. Generous timeout: a cold local model loads first.
+ */
+async function realChatCompletion(v, timeout = 120000) {
+  const key = v.LITELLM_MASTER_KEY;
+  const model = v.SPECTRE_LITELLM_MODEL || "spectre-default";
+  try {
+    const r = await fetch("http://127.0.0.1:4000/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, messages: [{ role: "user", content: "Reply with just the word: ok" }], max_tokens: 16 }),
+      signal: AbortSignal.timeout(timeout),
+    });
+    if (!r.ok) {
+      const body = (await r.text()).slice(0, 160);
+      return { ok: false, detail: `gateway HTTP ${r.status}${body ? " -- " + body.replace(/\s+/g, " ") : ""}` };
+    }
+    const j = await r.json();
+    const text = j?.choices?.[0]?.message?.content ?? "";
+    return String(text).trim() ? { ok: true, detail: String(text).trim().slice(0, 40) } : { ok: false, detail: "empty completion" };
+  } catch (e) {
+    return { ok: false, detail: e?.name === "TimeoutError" ? "timed out (the model may still be loading)" : (e?.message || String(e)) };
+  }
+}
+
+/**
+ * The real success gate after bring-up: containers Up, core + shell healthy, and
+ * one real chat completion goes through. In `strict` mode (the AI-driven path) any
+ * failure is FATAL (exits with a SPECTRE_FATAL marker) so the caller can't declare
+ * a false success; interactively, failures print as actionable warnings.
+ * Returns { coreHealthy, shellHealthy, chatOk }.
+ */
+async function verifyStack({ mainComposeArgv, composeProfiles, v, strict, port }) {
+  const fail = (msg) => { if (strict) fatal(msg); else console.log(C.warn("  ! " + msg)); };
+
+  // 1. containers Up
+  const ps = await composePsRunning(mainComposeArgv);
+  if (ps.ok) {
+    console.log(C.ok(`  + all ${ps.items.length} containers are Up`));
+    stepOk("containers-up");
+  } else {
+    const names = ps.notUp.map((s) => s.Service || s.Name || "?").join(", ");
+    fail(`containers not all Up${names ? " (" + names + ")" : ""}${ps.detail ? " -- " + ps.detail : ""}. See: docker compose logs`);
+  }
+
+  // 2. core health (DB + schema + gateway) -- authoritative
+  const coreHealthy = await healthCheck("http://127.0.0.1:8787/api/health");
+  if (coreHealthy) { console.log(C.ok("  + core healthy") + C.dim("  (DB + schema + gateway)")); stepOk("core-health"); }
+  else fail("core did not become healthy on :8787/api/health -- `docker compose logs core` (schema not applied? DB unreachable?)");
+
+  // 3. shell health (UI profiles only)
+  let shellHealthy = true;
+  if (composeProfiles.includes("ui")) {
+    shellHealthy = await healthCheck(`http://127.0.0.1:${port}/`, 30, 2000);
+    if (shellHealthy) { console.log(C.ok(`  + shell healthy on :${port}`)); stepOk("shell-health"); }
+    else fail(`shell did not answer on :${port} -- \`docker compose logs shell\``);
+  }
+
+  // 4. one real chat completion through the gateway -- the honest proof
+  console.log(C.dim("  Sending one real chat completion through the stack..."));
+  const chat = await realChatCompletion(v);
+  if (chat.ok) { console.log(C.ok("  + chat works end-to-end") + C.dim(`  (model replied: ${chat.detail})`)); stepOk("chat-completion"); }
+  else fail(`chat completion failed -- ${chat.detail}. Check the brain model/key (Settings -> Providers) or that Ollama is running.`);
+
+  return { coreHealthy, shellHealthy, chatOk: chat.ok };
+}
+
 // ---- the wizard -------------------------------------------------------------
 
 // Total phase count (kept in one place so numbering stays consistent).
@@ -1518,8 +1887,14 @@ const TOTAL_PHASES = 7;
 
 async function main() {
   const args = new Set(process.argv.slice(2));
+  const flags = parseFlags(process.argv.slice(2));
   const dryRun = args.has("--dry-run");
   const checkOnly = args.has("--check");
+  // Non-interactive (AI-driven / unattended): proceed on flags+env+defaults, never
+  // prompt. Aliased by --yes and env SPECTRE_INSTALL_NONINTERACTIVE=1.
+  const nonInteractive =
+    !dryRun && !checkOnly &&
+    ("non-interactive" in flags || "yes" in flags || process.env.SPECTRE_INSTALL_NONINTERACTIVE === "1");
 
   // Uninstall path -- runs INSTEAD of the install wizard; exits when done.
   if (args.has("--uninstall")) {
@@ -1556,14 +1931,29 @@ async function main() {
     console.log(C.dim("   - Mac/Windows: Docker Desktop"));
     console.log(C.dim("                 https://www.docker.com/products/docker-desktop/"));
     console.log(C.dim("   (only `docker` + `docker compose` on PATH are needed -- Desktop not required)\n"));
-    if (!dryRun) process.exit(1);
+    if (!dryRun) { if (nonInteractive) fatal("Docker with Compose v2 is required and not on PATH."); process.exit(1); }
   }
 
-  // Interactive-only: the wizard + sub-logins read from a real TTY. Fail fast with
-  // a clear message instead of hanging when piped / run in CI (use --check/--dry-run).
-  if (!dryRun && !checkOnly && !stdin.isTTY) {
+  // The DAEMON must be up (the CLI on PATH isn't enough -- a stopped Docker
+  // Desktop / dead docker.service still answers --version). Verify + recover.
+  if (!dryRun && env.docker.found) {
+    const daemonUp = await dockerDaemonReady({ wait: true });
+    if (!daemonUp) {
+      const msg = "the Docker daemon is not running. Start Docker Desktop (Mac/Windows) or `sudo systemctl start docker` (Linux), then re-run.";
+      if (nonInteractive) fatal(msg);
+      console.log(C.err("\n  x " + msg + "\n"));
+      process.exit(1);
+    }
+    stepOk("docker-daemon");
+  }
+
+  // Interactive-only: the wizard + sub-logins read from a real TTY. In
+  // non-interactive mode we PROCEED on flags+env+defaults instead of exiting.
+  // Fail fast (rather than hang) only when a real interactive run has no TTY.
+  if (!dryRun && !checkOnly && !nonInteractive && !stdin.isTTY) {
     console.log(C.err("\n  This installer is interactive -- run it in a terminal (not piped/CI)."));
-    console.log(C.dim("  For a non-interactive preview use:  node installer/install.mjs --dry-run\n"));
+    console.log(C.dim("  For an unattended / AI-driven install pass --non-interactive with flags"));
+    console.log(C.dim("  (see agent-install/README.md). For a preview use --dry-run.\n"));
     process.exit(1);
   }
 
@@ -1579,7 +1969,8 @@ async function main() {
     ));
   }
 
-  const rl = createInterface({ input: stdin, output: stdout });
+  // No readline in non-interactive mode -- there are no prompts to answer.
+  const rl = nonInteractive ? null : createInterface({ input: stdin, output: stdout });
 
   // Local Ollama models the user has -- drive both the setup-guide pick and the
   // runtime-model pick below. Fetched once. null = the daemon isn't running.
@@ -1596,11 +1987,12 @@ async function main() {
     (await rl.question(`   ${q}${def ? C.dim(` [${def}]`) : ""}: `)).trim() || def;
 
   // Re-run on an existing install: offer manage actions (update / reconfigure /
-  // uninstall) instead of silently restarting first-time setup.
-  if (!firstInstall && !dryRun && (await handleExistingInstall(rl, askRaw, seed))) return;
+  // uninstall) instead of silently restarting first-time setup. Skipped when
+  // non-interactive -- a re-run there just reconfigures from the flags/env.
+  if (!firstInstall && !dryRun && !nonInteractive && (await handleExistingInstall(rl, askRaw, seed))) return;
 
   let guide = null;
-  if (!dryRun && !args.has("--no-guide")) {
+  if (!dryRun && !nonInteractive && !args.has("--no-guide")) {
     guide = await chooseNarrator(rl, askRaw);
     if (guide) {
       console.log();
@@ -1626,7 +2018,15 @@ async function main() {
   let composeProfiles = seed.COMPOSE_PROFILES ?? "ui";
   let profile = "standard";
   let v;
-  if (dryRun) {
+  let niOpts = null; // non-interactive tailscale/boot toggles (null in other paths)
+  if (nonInteractive) {
+    niOpts = await resolveNonInteractive({ flags, seed, scan, chatModels, firstInstall });
+    v = niOpts.v;
+    composeProfiles = niOpts.composeProfiles;
+    profile = niOpts.profile;
+    useLocalDb = niOpts.useLocalDb;
+    wantClaude = niOpts.wantClaude;
+  } else if (dryRun) {
     console.log(C.dim("\n  --dry-run: using example/seed values, writing nothing, no docker.\n"));
     wantClaude = seed.SPECTRE_ALLOW_CLAUDE_CLI === "1";
     v = {
@@ -1802,6 +2202,10 @@ async function main() {
       }
     }
 
+    // Only bake the Claude/Codex CLIs into the core image (+~1GB) when the user
+    // actually opted into one -- the default local/API brain path stays lean.
+    if (v.SPECTRE_ALLOW_CLAUDE_CLI === "1" || v.SPECTRE_ALLOW_CODEX_CLI === "1") v.INSTALL_CLIS = "1";
+
     // Phase 4: install profile + channels.
     phase(4, TOTAL_PHASES, "profile & channels");
     const picked = await chooseProfile(ask, guide);
@@ -1824,6 +2228,15 @@ async function main() {
       v.GH_TOKEN = (await ask("GitHub token (repo scope -- clone/push/PR; Enter to skip)", seed.GH_TOKEN)) || "";
       v.WORKSPACE_TRUSTED_DIRS =
         (await ask("Trusted local folders (comma-sep absolute paths; Enter to skip)", seed.WORKSPACE_TRUSTED_DIRS)) || "";
+      // Wire the FIRST trusted path into compose's single bind-mount slot so the
+      // IDE can actually open it (mapped read/write at /trusted/<basename>).
+      const firstTrusted = v.WORKSPACE_TRUSTED_DIRS.split(",").map((s) => s.trim()).filter(Boolean)[0];
+      if (firstTrusted) {
+        const name = (firstTrusted.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "dir").replace(/[^A-Za-z0-9_.-]/g, "_");
+        v.SPECTRE_TRUSTED_MOUNT_1 = `${firstTrusted}:/trusted/${name}`;
+        v.WORKSPACE_TRUSTED_DIRS = `/trusted/${name}`;
+        console.log(C.dim(`   trusted folder mounted at /trusted/${name}`));
+      }
     }
 
     // One-click updates: the `update` profile runs the updater sidecar so the Shell
@@ -1861,6 +2274,7 @@ async function main() {
     v.LITELLM_MASTER_KEY = seed.LITELLM_MASTER_KEY || genHex();
     v.SPECTRE_SERVICE_TOKEN = seed.SPECTRE_SERVICE_TOKEN || genHex();
     v.WORKSPACE_SERVICE_TOKEN = seed.WORKSPACE_SERVICE_TOKEN || genHex();
+    v.UPDATER_TOKEN = seed.UPDATER_TOKEN || genHex();
     v.CODE_SERVER_PASSWORD = seed.CODE_SERVER_PASSWORD || genHex(16);
     v.GH_TOKEN = v.GH_TOKEN ?? seed.GH_TOKEN ?? "";
     v.WORKSPACE_TRUSTED_DIRS = v.WORKSPACE_TRUSTED_DIRS ?? seed.WORKSPACE_TRUSTED_DIRS ?? "";
@@ -1896,7 +2310,7 @@ async function main() {
 
     await offerWslMemoryCap(ask);
   }
-  rl.close();
+  rl?.close();
 
   const body = renderEnv(buildEnv(v, seed));
 
@@ -1960,6 +2374,9 @@ async function main() {
   // `docker compose up --build` compiles it locally in the launch phase.
   phase(6, TOTAL_PHASES, "downloads");
   console.log(C.dim("  Verifying images -- pulling anything not already cached...\n"));
+  // NON-FATAL noise to expect here: 'pull access denied for spectre-core' (it's a
+  // locally-BUILT image, never on a registry -- the pre-pull skips it) and cached
+  // "already present" lines. Only a SPECTRE_FATAL line / non-zero exit is a real stop.
 
   const localDbComposeArgv = useLocalDb
     ? ["-f", "local-db/docker-compose.yml", "--env-file", "local-db/.env"]
@@ -1969,8 +2386,10 @@ async function main() {
     await prePullImages(mainComposeArgv, localDbComposeArgv);
   } catch (e) {
     // prePullImages already printed the classified error.
+    if (nonInteractive) fatal("image pull failed -- registry unreachable? (see the classified error above)");
     process.exit(1);
   }
+  stepOk("downloads");
 
   // Phase 7: launch -- bring everything up sequentially; never two `up`s at once.
   phase(7, TOTAL_PHASES, "launch");
@@ -1982,10 +2401,12 @@ async function main() {
       // setupLocalDb() now skips the pull (done above); just does up + wait + schema.
       await setupLocalDb();
     } catch (e) {
+      if (nonInteractive) fatal("local database did not initialise -- " + (e?.message || e));
       console.log(C.err("\n   " + (e?.message || e) + "\n"));
       process.exit(1);
     }
     console.log(C.ok("   + local database up + schema applied\n"));
+    stepOk("local-db");
   }
 
   // Step 7b: main stack up.
@@ -2001,22 +2422,25 @@ async function main() {
     });
   } catch {
     console.log(C.err("\n  docker compose failed -- check the output above.\n"));
+    if (nonInteractive) fatal("docker compose up failed -- see the build/up output above.");
     process.exit(1);
   }
+  stepOk("stack-up");
 
-  // Step 7c: health poll.
-  const healthy = await healthCheck("http://127.0.0.1:8787/api/health");
+  // Reclaim build cache so it doesn't pile up across updates (non-fatal, best-effort).
+  try { execSync("docker builder prune -f", { cwd: ROOT, stdio: "ignore" }); } catch { /* ignore */ }
+
+  // Step 7c: REAL verification gates -- containers Up, core + shell healthy, and
+  // one genuine chat completion. In non-interactive mode any failure is FATAL
+  // (a SPECTRE_FATAL marker + non-zero exit) so the AI can't declare a false
+  // success; interactively the same checks print as actionable warnings.
   const port = v.SHELL_PORT || "3100";
   const host = tailnetHost();
-  console.log(
-    healthy
-      ? C.ok("\n  + core healthy")
-      : C.warn(
-          "\n  ! core not ready -- `docker compose logs core`.\n" +
-          "    If /api/health reports the schema isn't applied, run\n" +
-          "    supabase/_apply_all.sql in the Supabase SQL editor (see above).",
-        ),
-  );
+  console.log("");
+  console.log(C.dim("  " + "-".repeat(56)));
+  console.log(C.b("  Verifying the running stack"));
+  const verdict = await verifyStack({ mainComposeArgv, composeProfiles, v, strict: nonInteractive, port });
+  const healthy = verdict.coreHealthy;
   await guide?.narrate(
     healthy
       ? "The stack is up and the core is healthy. In one or two upbeat sentences, tell the user they can open Spectre now, that the same link adapts to phone and desktop, and they unlock it with the PIN they set."
@@ -2030,8 +2454,8 @@ async function main() {
     if (host) lines.push(`  > https://${host}   (tailnet)`);
     lines.push(`  Same URL adapts to desktop or mobile. PIN to enter.`);
     if (composeProfiles.includes("workspace")) {
-      lines.push(`  Workspaces password (stored in .env.docker):`);
-      lines.push(`    ${v.CODE_SERVER_PASSWORD}`);
+      // Never print the editor password to stdout -- it lives in .env.docker only.
+      lines.push(`  Workspaces editor password: in .env.docker (CODE_SERVER_PASSWORD).`);
     }
     const width = Math.max(...lines.map((l) => l.length)) + 2;
     const bar = "+" + "-".repeat(width) + "+";
@@ -2059,8 +2483,60 @@ async function main() {
   }
   console.log(C.dim("\n  Re-run / update anytime:  " + composeCmd + "\n"));
 
+  if (nonInteractive) {
+    // No prompts: set up the boot service + tailnet HTTPS from flags, then emit a
+    // machine-readable summary the AI relays to the user in chat (and closes with
+    // "anything still unclear?" -- see agent-install/README.md).
+    await finishingTouchesNonInteractive({ v, composeProfiles, port, ...niOpts });
+    const brainModel = niOpts?.brainTest?.kind === "api" ? niOpts.brainTest.model : `ollama_chat/${niOpts?.brainTest?.name}`;
+    const url = composeProfiles.includes("ui")
+      ? (host ? `https://${host}` : `http://127.0.0.1:${port}`)
+      : "http://127.0.0.1:8787 (headless API)";
+    console.log("\n" + C.b("  Install summary") + C.dim("  (relay this to the user, then ask: is anything still unclear?)"));
+    console.log(`SPECTRE_SUMMARY:install_dir=${ROOT}`);
+    console.log(`SPECTRE_SUMMARY:profile=${profile}`);
+    console.log(`SPECTRE_SUMMARY:brain=${brainModel}`);
+    console.log(`SPECTRE_SUMMARY:chat_ok=${verdict.chatOk}`);
+    console.log(`SPECTRE_SUMMARY:url=${url}`);
+    console.log(`SPECTRE_SUMMARY:core_healthy=${verdict.coreHealthy}`);
+    stepOk("done");
+    console.log(C.ok("\n  Spectre is installed and verified. Open " + url + " and unlock with the PIN.\n"));
+    return;
+  }
+
   // Boot service (so it survives restarts) + help finishing channels / Tailscale.
   await finishingTouches({ guide, v, composeProfiles, port });
+}
+
+/**
+ * Non-interactive post-install: enable the boot service (unless --no-boot-service)
+ * and serve over Tailscale HTTPS when a tailnet is present (unless --no-tailscale).
+ * No prompts -- the AI-driven path decides via flags. Best-effort; never fatal.
+ */
+async function finishingTouchesNonInteractive({ v, composeProfiles, port, noTailscale, noBootService }) {
+  console.log("");
+  console.log(C.dim("  " + "-".repeat(56)));
+  console.log(C.b("  Finishing touches"));
+
+  if (!noBootService && hasSystemd()) {
+    installSystemdService(composeProfiles);
+  } else if (!noBootService && process.platform !== "linux") {
+    console.log(C.dim("   (boot service is Linux/systemd only; on this OS Docker Desktop's 'start on login' keeps it up.)"));
+  }
+
+  if (!noTailscale && composeProfiles.includes("ui")) {
+    const host = tailnetHost();
+    if (host) {
+      const cmd = `tailscale serve --bg https / http://127.0.0.1:${port}`;
+      console.log(C.dim("   Serving over Tailscale HTTPS: " + cmd));
+      try {
+        execSync(cmd, { stdio: "ignore" });
+        console.log(C.ok(`   + serving over Tailscale`) + C.dim(` -> https://${host}`));
+      } catch (e) {
+        console.log(C.warn("   ! tailscale serve failed -- run it yourself: " + cmd));
+      }
+    }
+  }
 }
 
 async function healthCheck(url, tries = 30, gapMs = 2000) {
@@ -2216,7 +2692,11 @@ async function finishingTouches({ guide, v, composeProfiles, port }) {
 const isMain = import.meta.url === pathToFileURL(process.argv[1] || "").href;
 if (isMain) {
   main().catch((e) => {
-    console.error(C.err("\n  installer error: " + (e?.message || e)));
-    process.exit(1);
+    // A FatalError was already reported via a SPECTRE_FATAL line -- just flag the
+    // non-zero exit. Any other error is an unexpected crash; surface it.
+    if (!(e instanceof FatalError)) console.error(C.err("\n  installer error: " + (e?.message || e)));
+    // Set the code and let the loop drain naturally (a forced process.exit() here
+    // trips a libuv teardown assertion on Windows when async probes are closing).
+    process.exitCode = 1;
   });
 }

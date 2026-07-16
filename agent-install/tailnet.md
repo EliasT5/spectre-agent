@@ -1,6 +1,6 @@
 # Tailnet Remote Access Playbook
 
-Follow the global rules in `README.md`: official repo only, show commands first, confirm `sudo`/admin and startup changes, stop on first error, and never print the PIN or secrets.
+Follow the global rules in `README.md`: official repo only, run the commands yourself (showing each in chat first), confirm `sudo`/admin and startup changes, stop on first error, and never print or invent the PIN or any secret. You drive this over chat — the human only clicks Tailscale's "Log in" and types their PIN into the browser.
 
 ## Goal
 
@@ -40,7 +40,7 @@ Expected: the host appears with a name like `your-host.your-tailnet.ts.net`.
 
 ## 2. Serve Spectre over HTTPS on the tailnet
 
-The installer detects Tailscale and offers to run this for you during setup. If it did and it succeeded, skip to step 3. Otherwise run it yourself from any shell on the host (replace `3100` if the human chose a different `SHELL_PORT`):
+If Tailscale was already installed when you ran the non-interactive installer, it ran this for you automatically (unless you passed `--no-tailscale`) — skip to step 3. Otherwise run it yourself from any shell on the host (replace `3100` if the human chose a different `--shell-port`):
 
 ```bash
 tailscale serve --bg https / http://127.0.0.1:3100
@@ -70,7 +70,7 @@ Notes:
    ```
 
    (Get `<host>.<tailnet>.ts.net` from `tailscale status` on the host, or from the phone's Tailscale app device list.)
-3. The human enters the PIN they set during install. The same URL adapts to the mobile layout. Do not enter or invent the PIN for them.
+3. The human types, into the browser, the PIN they chose during install. The same URL adapts to the mobile layout. You never see, enter, or invent the PIN.
 
 Because this is HTTPS, the `Secure` session cookie sets correctly and login sticks.
 

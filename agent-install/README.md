@@ -1,83 +1,182 @@
 # Spectre Agent AI-CLI Install Playbook
 
-This is the playbook an AI CLI follows to install Spectre Agent from the official repository.
+This is the playbook an AI CLI follows to install Spectre Agent for a **non-technical
+user, entirely through the chat window**. You ask plain-language questions in chat,
+map the answers to installer flags, and run every command yourself. The human never
+touches the terminal wizard.
+
+## The golden rule
+
+**Never hand the human a terminal wizard.** The installer has a fully unattended mode
+(`--non-interactive`). You gather the choices in chat, then run:
+
+```bash
+node installer/install.mjs --non-interactive <flags>
+```
+
+The only thing you ask the human to run themselves is the **one-line PIN hash**
+(below) — so you never see or invent their PIN.
 
 ## Rules
 
-- Use only the official repo: `https://github.com/EliasT5/spectre-agent.git`.
-- After cloning, run `git remote -v`; abort if every remote URL is not the official repo URL.
-- Show each command before running it.
-- Confirm with the human before anything using `sudo` or admin rights, anything destructive, or anything that changes boot/login startup items.
-- Stop on the first error. Report the command and exact error. Do not continue with guessed workarounds.
-- Never print, store, invent, suggest, log, or repeat the PIN or API keys.
-- Never print `.env.docker`; it contains `PIN_HASH` and may contain secrets.
-- The installer wizard is interactive. Hand the terminal to the human. Do not answer for them, pipe input, use `expect`, or invent a PIN.
-- Do not add `pm2`, `nohup`, `forever`, cron `@reboot`, reverse proxies, TLS, firewall changes, or port remapping.
-- The Compose services already use `restart: unless-stopped`; autostart only requires Docker to start and the stack to have been started once from the install directory.
+- Use only the official repo: `https://github.com/EliasT5/spectre-agent.git`. After cloning, run `git remote -v` and abort if any remote is not that URL.
+- Show each command in chat before you run it, in plain language.
+- Confirm with the human before anything using `sudo`/admin rights, anything destructive, or anything that changes boot/login startup items.
+- Never print, store, invent, suggest, log, or repeat the PIN or any API key. Never print `.env.docker` (it holds `PIN_HASH` and secrets).
+- Treat a `SPECTRE_FATAL:` line **or** a non-zero exit as the only real failures. These lines are **expected and NOT failures**: `pull access denied for spectre-core` (a locally-built image), `already present`, and a provider key marked `unverified`.
+- Do not add `pm2`, `nohup`, `forever`, cron `@reboot`, reverse proxies, TLS, firewall changes, or port remapping — the installer's `--non-interactive` flags cover startup and tailnet HTTPS.
 
-## Steps
+## Step 1 — Prerequisites (install the missing ones yourself)
 
-1. Detect OS and architecture.
-2. Check for prerequisites and offer to install missing ones: `git`, Docker with the Compose plugin and running daemon, and Node.js 20+.
-3. Clone the official repo, then verify it:
+Detect OS + architecture, then check `git`, Docker (with the Compose plugin **and a
+running daemon**), and Node.js 20+. Verify the Docker **daemon** with `docker info`
+(not just `docker --version` — the CLI answers even when the daemon is stopped).
 
-   ```bash
-   git remote -v
-   ```
+**macOS** (Homebrew):
 
-   Expected remote URL:
-
-   ```text
-   https://github.com/EliasT5/spectre-agent.git
-   ```
-
-4. From the repo root, run the interactive wizard and hand the terminal to the human:
-
-   ```bash
-   node installer/install.mjs
-   ```
-
-   Brief the human first: the wizard asks which database to use, which **brain model** to use, which profile to install, and which PIN to set. Bundled local Postgres, local Ollama, and the Standard profile are normal defaults. The raw PIN is never stored; only `PIN_HASH` is written to `.env.docker`.
-
-   **Choosing + testing a brain model** (this is what makes chat work out of the box): at the brain-model step the wizard offers a local Ollama model (recommended, no keys) or an API model (bring a key). If the human has no suitable local model, the wizard offers to **pull a small capable one** (e.g. `qwen2.5:7b-instruct`, or the lighter `llama3.2:3b`) and waits for it. It then wires the choice into `spectre-default` and **runs a quick test** — a one-token ping at the local Ollama daemon, or a key-auth check for an API provider — and reports pass or fail. If the test fails, the wizard prints the fix (usually `ollama pull <model>`); the human can also change the model later in **Settings → Providers**. The default brain is always a gateway-backed model, never a subscription CLI, so chat never lands on an unconfigured CLI. Do not paste a model choice for the human — hand them the terminal.
-
-5. Set up always-on startup using the matching OS file:
-
-   - [Linux](./linux.md)
-   - [macOS](./macos.md)
-   - [Windows](./windows.md)
-
-6. Verify the stack:
-
-   ```bash
-   docker compose --env-file .env.docker ps
-   ```
-
-7. (Optional) Set up remote access from a phone or another computer over the tailnet: [tailnet.md](./tailnet.md). HTTPS is required there or PIN login loops.
-
-8. Report the install directory, chosen profile if known, the brain model chosen (and whether its test passed) if known, startup mechanism, and the correct local URL.
-
-## Verify
-
-For Standard or Full profiles, open:
-
-```text
-http://127.0.0.1:3100
+```bash
+brew install git node
+brew install --cask docker      # then open Docker Desktop once so the daemon starts
+open -a Docker
 ```
 
-For Headless, verify the core:
+**Windows** (winget, in PowerShell):
 
-```text
-http://127.0.0.1:8787
+```powershell
+winget install --id Git.Git -e
+winget install --id OpenJS.NodeJS.LTS -e
+winget install --id Docker.DockerDesktop -e
+# Then launch Docker Desktop once and wait for the whale icon to go steady.
 ```
 
-The human signs in with the PIN they typed during the wizard. Do not promise to recover or report it.
+**Debian/Ubuntu Linux**:
+
+```bash
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs
+# Docker Engine + compose plugin:
+curl -fsSL https://get.docker.com | sudo sh
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"   # then have the user re-login so `docker` works without sudo
+```
+
+**Fedora/RHEL Linux**:
+
+```bash
+sudo dnf install -y git nodejs
+sudo dnf install -y dnf-plugins-core
+sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo systemctl enable --now docker
+```
+
+If `docker info` fails after install, tell the human to start Docker Desktop (Mac/Windows)
+or run `sudo systemctl start docker` (Linux), then continue. The installer also waits for
+the daemon on its own.
+
+## Step 2 — Clone + verify the repo
+
+```bash
+git clone https://github.com/EliasT5/spectre-agent.git
+cd spectre-agent
+git remote -v   # every line must be the official URL above, else abort
+```
+
+## Step 3 — Ask the human, in chat, plain language
+
+Ask only what matters; use the defaults for the rest. Suggested questions and how each
+maps to a flag:
+
+| Ask in chat | Flag | Default if they don't care |
+| --- | --- | --- |
+| "Store everything on this machine, or use a cloud database?" | `--db=local` / `--db=cloud` | `--db=local` (recommended — cloud needs a manual SQL paste you can't automate) |
+| "Just the app, or add the code Workspaces IDE? (or no web UI at all?)" | `--profile=standard` / `full` / `headless` | `--profile=standard` |
+| "Run the AI on this machine for free (local), or use a provider like Anthropic/OpenAI with a key?" | `--brain=ollama:<model>` / `--brain=api:<model>` | `--brain=ollama:qwen2.5:7b-instruct --pull-model` |
+| (if they picked a provider) "Paste your API key" — you set it as **env**, never a flag | env `SPECTRE_KEY_<PROVIDER>` | — |
+| "Want to reach it from your phone later?" | (leave tailnet on; set up later) | tailnet HTTPS auto-enabled if Tailscale is present |
+
+Then get the **PIN** without ever seeing it (next step).
+
+## Step 4 — The PIN, without you seeing it
+
+Ask the human to pick a PIN (≥6 digits, not a repeat/sequence), then have **them** run
+this one-liner in their own terminal and paste back only the **hash** it prints:
+
+```bash
+node -e "process.stdout.write(require('node:crypto').createHash('sha256').update(String(process.argv[1])).digest('hex')+'\n')" <THEIR-PIN>
+```
+
+You pass the pasted hash as `--pin-hash=<hash>`. You never learn the raw PIN.
+
+## Step 5 — Run the unattended install yourself
+
+Compose the flags from the answers and run it. Example (local DB, standard profile,
+local brain, phone access off for now):
+
+```bash
+node installer/install.mjs --non-interactive \
+  --db=local \
+  --profile=standard \
+  --brain=ollama:qwen2.5:7b-instruct --pull-model \
+  --pin-hash=<hash-from-step-4>
+```
+
+Example with a hosted brain (key passed as env, never a flag):
+
+```bash
+SPECTRE_KEY_ANTHROPIC=<their-key> node installer/install.mjs --non-interactive \
+  --db=local --profile=standard \
+  --brain=api:anthropic/claude-sonnet-4-6 \
+  --pin-hash=<hash>
+```
+
+Watch the output for `SPECTRE_STEP_OK:<name>` progress markers. Stop and report only on a
+`SPECTRE_FATAL:` line or a non-zero exit — the installer's own verification gates
+(containers Up, core + shell healthy, one real chat completion) run automatically and
+turn any real problem into a `SPECTRE_FATAL:`.
+
+### Full flag / env reference
+
+Non-interactive trigger: `--non-interactive` (alias `--yes`, or env `SPECTRE_INSTALL_NONINTERACTIVE=1`).
+
+- **Database:** `--db=local|cloud` (default `local`). Cloud also needs `--supabase-url=<url>` and `--supabase-service-key=<key>` (or env `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`). Cloud requires a **manual** one-time paste of `supabase/_apply_all.sql` in the Supabase SQL editor — prefer local for a hands-off install.
+- **Profile:** `--profile=headless|standard|full` (default `standard`).
+- **Brain:** `--brain=ollama:<model>` or `--brain=api:<model>` (default `ollama:<first installed model, else qwen2.5:7b-instruct>`). `--pull-model` pulls the Ollama model now. `--brain-key-env=<ENV>` names the env var holding an API brain's key (defaults to the provider's conventional var).
+- **Day-to-day local models (optional):** `--learn-model=<model>`, `--embed-model=<model>`.
+- **Provider API keys:** set as env `SPECTRE_KEY_<PROVIDER>` — `ANTHROPIC`, `OPENAI`, `GOOGLE`, `OPENROUTER`, `GROQ`, `MISTRAL`, `DEEPSEEK`, `XAI`, `TOGETHER`, `FIREWORKS`, `CEREBRAS`, `PERPLEXITY`, `HUGGINGFACE` (or the provider's own env var, e.g. `ANTHROPIC_API_KEY`). Never pass a key as a flag.
+- **PIN:** `--pin-hash=<sha256 hex>` (or env `SPECTRE_PIN_HASH`). Required on a first install; a re-run keeps the existing PIN if omitted.
+- **Networking:** `--shell-port=<n>` (default `3100`), `--bind=127.0.0.1|0.0.0.0` (default `127.0.0.1`; only use `0.0.0.0` behind HTTPS).
+- **Channels:** `--telegram-token=`, `--telegram-allowed-ids=`, `--whatsapp-token=`, `--whatsapp-phone-id=`, `--whatsapp-app-secret=`, `--whatsapp-allowed-ids=`, `--discord-token=`, `--discord-allowed-ids=` (or the matching env vars). Webhook secrets are generated for you.
+- **CLI subscription brains (optional, opt-in):** `--enable-claude-cli` (+ `--claude-oauth-token=` or env `CLAUDE_CODE_OAUTH_TOKEN`), `--enable-codex-cli`, `--enable-gemini-cli`. Enabling Claude/Codex bakes those CLIs into the core image (+~1GB); the default local/API path stays lean.
+- **Workspaces (Full profile):** `--gh-token=<token>` (or env `GH_TOKEN`), `--trusted-dirs=<comma-sep absolute host paths>` (the first is mounted read/write for the IDE).
+- **Post-install toggles:** `--no-tailscale` (skip tailnet HTTPS), `--no-boot-service` (skip the Linux/systemd boot service).
+
+### Output markers
+
+- `SPECTRE_STEP_OK:<name>` — a step finished (`docker-daemon`, `database`, `brain`, `configure`, `downloads`, `local-db`, `stack-up`, `containers-up`, `core-health`, `shell-health`, `chat-completion`, `done`).
+- `SPECTRE_FATAL:<msg>` — a real, install-stopping failure. Report the message.
+- `SPECTRE_SUMMARY:<key>=<value>` — the closing report (install dir, profile, brain, chat_ok, url, core_healthy).
+
+## Step 6 — Close the loop (the assist)
+
+On success the installer prints a `SPECTRE_SUMMARY:` block. Relay it to the human in
+plain language:
+
+- where it's installed, which profile, which brain, and **whether the real chat test passed** (`chat_ok=true`),
+- the URL to open (`http://127.0.0.1:3100` for Standard/Full, or the core API for Headless),
+- that they unlock it with the PIN they chose.
+
+Then explicitly ask: **"Is anything still unclear?"** and answer their follow-ups in chat
+— how to open it, how to reach it from a phone ([tailnet.md](./tailnet.md)), how to add a
+messaging channel, or how updates work (below). Do not promise to recover or reveal the PIN.
 
 ## Remote access (phone + desktop)
 
-Loopback (`http://127.0.0.1:3100`) works on the host machine only. To reach Spectre from a phone or another computer, put it behind HTTPS on your private Tailscale network: [tailnet.md](./tailnet.md).
-
-HTTPS is not optional there — Spectre's session cookie is `Secure`, so browsers drop it over plain HTTP on any non-`localhost` hostname and PIN login loops. `tailscale serve` provides the HTTPS front door (tailnet-only, no public exposure). Confirm with the human before `sudo tailscale up`, and never enter or print the PIN.
+Loopback (`http://127.0.0.1:3100`) works on the host only. To reach Spectre from a phone
+or another computer, put it behind HTTPS on the private Tailscale network:
+[tailnet.md](./tailnet.md). If Tailscale is already installed, the non-interactive
+installer runs `tailscale serve` for you (unless you passed `--no-tailscale`). HTTPS is
+required there — Spectre's session cookie is `Secure`, so plain HTTP loops the PIN screen.
 
 ## Update
 
