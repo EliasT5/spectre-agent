@@ -15,6 +15,7 @@ import {
   CalendarDays,
   Terminal,
   GitBranch,
+  RefreshCw,
 } from "lucide-react";
 import {
   getGlobalMode,
@@ -73,6 +74,10 @@ type ModelCapability = {
   tools?: string[];
 };
 type ModelCapabilityMap = Record<string, ModelCapability>;
+type UpdateReminderMode = "ask" | "auto" | "off";
+type UpdateTarget = "core" | "shell";
+type TargetReminders = { mode: UpdateReminderMode; mutedUntil?: number };
+type UpdateReminders = { core: TargetReminders; shell: TargetReminders };
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -87,6 +92,15 @@ const APPROVAL_OPTIONS: { value: string; label: string; hint: string }[] = [
   { value: "balanced", label: "Balanced", hint: "RECOMMENDED · RUN ROUTINE WORK FREELY, APPROVE BIG CHANGES" },
   { value: "manual", label: "Manual", hint: "APPROVE EVERYTHING · BABYSIT" },
 ];
+
+const UPDATE_REMINDER_OPTIONS: { value: UpdateReminderMode; label: string; hint: string }[] = [
+  { value: "ask", label: "Ask", hint: "RECOMMENDED · OPENS A CHAT WHEN A NEW VERSION LANDS" },
+  { value: "auto", label: "Auto", hint: "REMINDS AS AUTO-UPDATE · APPLYING RUNS ON THE HOST" },
+  { value: "off", label: "Off", hint: "NO UPDATE REMINDERS" },
+];
+
+const MUTE_DAY_MS = 24 * 3600 * 1000;
+const MUTE_WEEK_MS = 7 * MUTE_DAY_MS;
 
 // Fallback list — used when /api/models doesn't return CLI providers
 const FALLBACK_SPECIALISTS: { id: string; provider: string; displayName: string }[] = [
@@ -162,6 +176,11 @@ export default function SettingsTab() {
   const [cliBackends, setCliBackends] = useState(false);
   const [ffBusy, setFfBusy] = useState("");
   const [ffMsg, setFfMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Update reminders (Settings → Updates) — how Spectre nudges about new versions.
+  const [updRem, setUpdRem] = useState<UpdateReminders | null>(null);
+  const [updRemBusy, setUpdRemBusy] = useState(false);
+  const [updRemMsg, setUpdRemMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // MS 365 app credentials (set in Settings, no .env).
   const [msForm, setMsForm] = useState({ clientId: "", clientSecret: "", tenantId: "", redirectUri: "" });
@@ -558,6 +577,39 @@ export default function SettingsTab() {
       setEnvMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
     } finally {
       setEnvBusy(false);
+    }
+  }
+
+  async function loadUpdateReminders() {
+    try {
+      const r = await fetch("/api/update/reminders");
+      if (r.ok) setUpdRem((await r.json()) as UpdateReminders);
+    } catch { /* fail-soft — the card just shows nothing selected */ }
+  }
+
+  async function saveUpdateReminders(
+    target: UpdateTarget,
+    body: { mode?: UpdateReminderMode; muteForMs?: number },
+  ) {
+    setUpdRemBusy(true);
+    setUpdRemMsg(null);
+    try {
+      const r = await fetch("/api/update/reminders", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target, ...body }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setUpdRem(j as UpdateReminders);
+        setUpdRemMsg({ ok: true, text: "Saved." });
+      } else {
+        setUpdRemMsg({ ok: false, text: (j as { error?: string }).error || `Failed (HTTP ${r.status}).` });
+      }
+    } catch (e) {
+      setUpdRemMsg({ ok: false, text: e instanceof Error ? e.message : "Request failed." });
+    } finally {
+      setUpdRemBusy(false);
     }
   }
 
@@ -994,6 +1046,7 @@ export default function SettingsTab() {
     void loadMsCreds();
     void loadVapid();
     void loadChannels();
+    void loadUpdateReminders();
   }, []);
 
   useEffect(() => {
@@ -1665,6 +1718,58 @@ export default function SettingsTab() {
           </div>
         </div>
         </div>{/* /settings-danger-zone */}
+
+        {/* ══════════════════════════════════════════════════════
+            SECTION: UPDATES
+        ══════════════════════════════════════════════════════ */}
+        <div className="settings-section-label">Updates</div>
+
+        <div className="settings-card">
+          <div className="glass-fresnel" aria-hidden />
+          <div className="settings-card-head">
+            <span className="settings-icon-badge">
+              <RefreshCw strokeWidth={1.6} />
+            </span>
+            <div className="settings-card-titles">
+              <span className="settings-card-eyebrow">SELF-UPDATE</span>
+              <h2 className="settings-card-title">Update reminders</h2>
+            </div>
+          </div>
+          <div className="settings-card-body">
+            <p className="settings-card-hint">
+              When a new Spectre version lands on GitHub, Spectre opens a chat to tell
+              you. Core and shell update independently — applying runs on the host:{" "}
+              <span className="settings-inline-code">scripts/spectre-update.sh --apply --target core|shell</span>.
+            </p>
+
+            <UpdateTargetRow
+              target="core"
+              title="Core"
+              subtitle="the engine · auto recommended"
+              settings={updRem?.core}
+              busy={updRemBusy}
+              onSave={(body) => void saveUpdateReminders("core", body)}
+            />
+
+            <UpdateTargetRow
+              target="shell"
+              title="Shell"
+              subtitle="the app UI"
+              settings={updRem?.shell}
+              busy={updRemBusy}
+              onSave={(body) => void saveUpdateReminders("shell", body)}
+              warning={
+                updRem?.shell?.mode === "auto"
+                  ? "Overwrites shell files on update; your modules, /data extensions, and uncommitted work are NOT touched."
+                  : undefined
+              }
+            />
+
+            {updRemMsg && (
+              <span className={`settings-form-msg ${updRemMsg.ok ? "ok" : "err"}`}>{updRemMsg.text}</span>
+            )}
+          </div>
+        </div>
 
         {/* ══════════════════════════════════════════════════════
             SECTION: INTEGRATIONS
@@ -2671,6 +2776,97 @@ export default function SettingsTab() {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function UpdateTargetRow({
+  target,
+  title,
+  subtitle,
+  settings,
+  busy,
+  onSave,
+  warning,
+}: {
+  target: UpdateTarget;
+  title: string;
+  subtitle: string;
+  settings?: TargetReminders;
+  busy: boolean;
+  onSave: (body: { mode?: UpdateReminderMode; muteForMs?: number }) => void;
+  warning?: string;
+}) {
+  const muted = !!(settings?.mutedUntil && settings.mutedUntil > Date.now());
+  return (
+    <div className="settings-comp-vendor-group" style={{ marginTop: 8 }}>
+      <div className="settings-provider-label" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {title}
+        <span style={{ opacity: 0.6, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+          {subtitle}
+        </span>
+        {muted && <SavedTag text="muted" />}
+      </div>
+
+      <div className="settings-select-list">
+        {UPDATE_REMINDER_OPTIONS.map((o) => (
+          <SelectRow
+            key={o.value}
+            active={settings?.mode === o.value}
+            onClick={() => onSave({ mode: o.value })}
+            label={o.label}
+            hint={o.hint}
+          />
+        ))}
+      </div>
+
+      {warning && (
+        <p className="settings-card-hint" style={{ marginTop: 8, color: "var(--color-error)", opacity: 0.9 }}>
+          ⚠ {warning}
+        </p>
+      )}
+
+      <div className="settings-comp-control-row">
+        <div className="settings-row-text">
+          <div className="settings-row-label">Mute {title.toLowerCase()} reminders</div>
+          <div className="settings-row-hint">
+            {muted
+              ? `muted until ${new Date(settings!.mutedUntil!).toLocaleString()}`
+              : "pause reminders without turning them off"}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className="settings-btn tap-press"
+            onClick={() => onSave({ muteForMs: MUTE_DAY_MS })}
+            disabled={busy}
+            aria-label={`Mute ${target} reminders for one day`}
+          >
+            1 day
+          </button>
+          <button
+            type="button"
+            className="settings-btn tap-press"
+            onClick={() => onSave({ muteForMs: MUTE_WEEK_MS })}
+            disabled={busy}
+            aria-label={`Mute ${target} reminders for one week`}
+          >
+            1 week
+          </button>
+          {muted && (
+            <button
+              type="button"
+              className="settings-btn tap-press"
+              onClick={() => onSave({ muteForMs: 0 })}
+              disabled={busy}
+              aria-label={`Unmute ${target} reminders`}
+            >
+              Unmute
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function SavedTag({ text = "saved ✓" }: { text?: string }) {
   return (

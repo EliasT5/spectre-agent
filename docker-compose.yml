@@ -291,6 +291,32 @@ services:
     depends_on: [code-server]
     restart: unless-stopped
 
+  # Update executor (opt-in: `--profile update`). Lets the Shell apply Spectre
+  # updates with a BUTTON — a container can't rebuild itself, so this small sidecar
+  # mounts the host Docker socket + the repo and drives scripts/spectre-update.mjs
+  # on demand (core proxies the PIN-gated shell) and on a schedule (per-target
+  # `auto` reminders). ⚠ PRIVILEGE: host Docker access ≈ root on the host — it is
+  # internal-only (no published port) and every route is gated by UPDATER_TOKEN.
+  updater:
+    build: ./updater-service
+    profiles: ["update"]
+    env_file: [.env.docker]
+    environment:
+      PORT: "8020"
+      REPO_DIR: "/repo"
+      UPDATER_TOKEN: "${UPDATER_TOKEN:-}"
+      # The script's health/reminders calls target the core over the compose network.
+      SPECTRE_CORE_URL: "http://core:8787"
+    volumes:
+      # Host Docker socket → run `docker compose build/up` on the host daemon.
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      # The repo = build contexts + the update script + .env.docker + .git (to pull).
+      - ".:/repo"
+    expose: ["8020"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
 volumes:
   spectre-workspaces:
   caddy-data:

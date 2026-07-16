@@ -1809,3 +1809,33 @@ button.tag:hover { border-color: var(--color-border-hover); color: var(--color-t
   cursor: pointer;
 }
 .update-banner-close:hover { color: var(--color-text); background: rgba(255, 255, 255, 0.06); }
+.update-banner-mute {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-faint, #8a8a99);
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.update-banner-mute:hover { color: var(--color-text); background: rgba(255, 255, 255, 0.06); }
+.update-banner-apply {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 0;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--grad-start, #6366f1), var(--grad-mid, #8b5cf6));
+  box-shadow: var(--inset-hi, inset 0 1px 0 rgba(255, 255, 255, 0.15));
+}
+.update-banner-apply:hover { filter: brightness(1.08); }
+.update-banner-apply:active { transform: scale(0.97); }
+.update-banner-spin { animation: ub-spin 0.7s linear infinite; }
+@keyframes ub-spin { to { transform: rotate(360deg); } }
