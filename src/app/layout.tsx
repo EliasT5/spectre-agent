@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import "./globals.css";
 import { RouteAtmosphere } from "@/components/atmosphere/RouteAtmosphere";
 import { ModuleOpenPrompt } from "@/components/ModuleOpenPrompt";
+import { UpdateBanner } from "@/components/UpdateBanner";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 import { asDevice, DEVICE_HEADER } from "@/lib/device";
 import { DeviceProvider } from "@/lib/device-context";
@@ -63,6 +64,7 @@ export default async function RootLayout({
           <Shell device={device}>{children}</Shell>
         </DeviceProvider>
         <ModuleOpenPrompt />
+        <UpdateBanner />
         <ServiceWorkerRegister />
       </body>
     </html>
