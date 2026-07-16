@@ -303,9 +303,18 @@ async function collectComposeImages(composeArgv) {
   if (res.code !== 0) return [];
   try {
     const cfg = JSON.parse(res.stdout);
+    const services = Object.values(cfg.services ?? {});
+    // Images that ANOTHER service BUILDS locally (e.g. spectre-core:local) are
+    // never on a registry — the chat/scheduler/channel runners reuse that tag with
+    // no `build` key, so they must NOT be pulled (that hard-exits a first install
+    // with "pull access denied for spectre-core"). Collect built tags and skip them.
+    const builtImages = new Set();
+    for (const svc of services) {
+      if (svc.build && svc.image) builtImages.add(svc.image);
+    }
     const imgs = new Set();
-    for (const svc of Object.values(cfg.services ?? {})) {
-      if (!svc.build && svc.image) imgs.add(svc.image);
+    for (const svc of services) {
+      if (!svc.build && svc.image && !builtImages.has(svc.image)) imgs.add(svc.image);
     }
     return [...imgs];
   } catch {
