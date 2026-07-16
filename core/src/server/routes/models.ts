@@ -201,8 +201,12 @@ models.get("/", async (c) => {
   for (const m of MODEL_CATALOG) {
     const p = m.provider;
     let added: boolean;
-    if (p === "claude-code" || p === "codex-cli" || p === "gemini-cli") added = cliAllowed(p) || hasCliToken(p);
-    else if (p === "spectre-mode") added = cliAllowed("claude-code") || hasCliToken("claude-code");
+    // A CLI brain only counts as "added" once it's actually AUTHENTICATED (a token
+    // set in Settings → Providers). Merely enabling the CLI is not enough — a
+    // token-less CLI can't run, so surfacing it as available was the "phantom
+    // provider" bug. Configure it in Settings and it appears; until then it's hidden.
+    if (p === "claude-code" || p === "codex-cli" || p === "gemini-cli") added = hasCliToken(p);
+    else if (p === "spectre-mode") added = hasCliToken("claude-code");
     else if (p === "litellm") added = liveProviderSet.has("litellm");
     else if (p === "ollama") added = liveProviderSet.has("ollama") && ollamaLiveIds.has(m.id);
     else if (p === "anthropic") added = !!process.env.ANTHROPIC_API_KEY;
@@ -317,19 +321,16 @@ models.get("/", async (c) => {
     result.push(entry);
   }
 
-  // ── 3. Add live Ollama models not already in catalog ──────────────────────
-  const ollamaUp = liveProviderSet.has("ollama");
-  for (const id of ollamaIds) {
-    if (seenIds.has(id)) continue;
-    seenIds.add(id);
-    result.push({
-      id,
-      provider: "ollama",
-      displayName: humanizeModelName(id),
-      available: ollamaUp,
-      detected: true,
-    });
-  }
+  // ── 3. (removed) Live-Ollama auto-surface ─────────────────────────────────
+  // We deliberately do NOT auto-list every model the local Ollama daemon happens
+  // to have. That flooded a fresh, unconfigured install with "phantom" models the
+  // user never set up (and turned the picker into noise). The picker now reflects
+  // only what's actually CONFIGURED: catalog Ollama entries still appear when they
+  // are genuinely pulled + running (section 1's `added` gate), the installer wires
+  // + tests the chosen brain into `spectre-default`, and anything else is added
+  // explicitly in Settings -> Providers. A locally-pulled model that isn't in the
+  // catalog reaches chat via `spectre-default` (or a litellm-config.yaml entry),
+  // not by silent auto-discovery.
 
   // ── 4. Add live Anthropic API models not already in catalog ───────────────
   const anthropicUp = liveProviderSet.has("anthropic");

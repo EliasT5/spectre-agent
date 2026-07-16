@@ -20,6 +20,43 @@ export async function ollamaModels(timeout = 4000) {
   }
 }
 
+/**
+ * One-token chat ping straight at the local Ollama daemon to confirm a model
+ * actually answers. Used by the installer's brain-model test: the LiteLLM gateway
+ * isn't up yet during setup (it starts in the launch phase and only proxies to
+ * this same daemon), so testing the backing model here validates the same path.
+ * A generous timeout because a cold model has to load into memory first.
+ * Returns { ok, detail }; never throws.
+ */
+export async function testOllamaChat(model, timeout = 60000) {
+  try {
+    const r = await fetch(`${OLLAMA}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: "Reply with just the word: ok" }],
+        stream: false,
+        options: { num_predict: 5 },
+      }),
+      signal: AbortSignal.timeout(timeout),
+    });
+    if (!r.ok) return { ok: false, detail: `Ollama returned HTTP ${r.status}` };
+    const j = await r.json();
+    const text = (j?.message?.content ?? "").trim();
+    return text
+      ? { ok: true, detail: text.slice(0, 40) }
+      : { ok: false, detail: "the model returned an empty reply" };
+  } catch (e) {
+    return {
+      ok: false,
+      detail: e?.name === "TimeoutError"
+        ? "timed out (the model may still be loading -- try chat once the stack is up)"
+        : (e?.message || String(e)),
+    };
+  }
+}
+
 /** Pick a chat model from what's installed (prefer the user's stack; skip embed-only). */
 export function pickGuideModel(models) {
   if (!models?.length) return null;

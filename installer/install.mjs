@@ -29,7 +29,7 @@ import { homedir, totalmem, tmpdir } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { CONNECTORS, API_PROVIDERS, LOCAL_DAEMONS } from "./connectors.mjs";
-import { ollamaModels } from "./guide.mjs";
+import { ollamaModels, testOllamaChat } from "./guide.mjs";
 import { chooseNarrator } from "./narrator.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -901,33 +901,100 @@ export function setBrainModelYaml(spec, configPath = join(ROOT, "litellm-config.
   return true;
 }
 
+// A small, capable, tool-capable chat model to recommend when the user has no
+// suitable local model yet. Primary is the best default; fallback is lighter for
+// low-RAM machines. Both support Ollama function-calling (the agentic loop needs it).
+const RECOMMENDED_PULL = "qwen2.5:7b-instruct";
+const RECOMMENDED_PULL_FALLBACK = "llama3.2:3b";
+
 /**
- * Pick the ONE model Spectre reasons + uses tools with, and persist it into
- * litellm-config.yaml's `spectre-default`. A local Ollama model (no keys), a
- * fresh pull, or a hosted API model. Additional models are added later in
- * Settings -> Providers; this just sets the default the core requests.
+ * Validate an API brain's credential CHEAPLY before we call it "working": a
+ * models-list auth check against the provider (no token spend). The three majors
+ * have a well-known endpoint; every other provider runs through the gateway and
+ * is validated on first chat. Returns { ok, detail }; never throws.
+ */
+async function testApiBrain(model, keyEnv, v) {
+  const key = v[keyEnv] || process.env[keyEnv];
+  if (!key) return { ok: false, detail: `${keyEnv} is not set` };
+  const prefix = String(model).split("/")[0];
+  const timeout = AbortSignal.timeout(8000);
+  try {
+    if (prefix === "anthropic") {
+      const r = await fetch("https://api.anthropic.com/v1/models", {
+        headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, signal: timeout,
+      });
+      return r.ok ? { ok: true, detail: "key accepted" } : { ok: false, detail: `provider returned HTTP ${r.status}` };
+    }
+    if (prefix === "openai") {
+      const r = await fetch("https://api.openai.com/v1/models", {
+        headers: { Authorization: `Bearer ${key}` }, signal: timeout,
+      });
+      return r.ok ? { ok: true, detail: "key accepted" } : { ok: false, detail: `provider returned HTTP ${r.status}` };
+    }
+    if (prefix === "gemini") {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
+        { signal: timeout },
+      );
+      return r.ok ? { ok: true, detail: "key accepted" } : { ok: false, detail: `provider returned HTTP ${r.status}` };
+    }
+    // Any other provider is fronted by the gateway; we can't cheaply validate its
+    // key here, so trust it's saved and let the first chat confirm it.
+    return { ok: true, detail: "key saved -- validated on your first chat via the gateway" };
+  } catch (e) {
+    return {
+      ok: false,
+      detail: e?.name === "TimeoutError" ? "timed out reaching the provider" : (e?.message || String(e)),
+    };
+  }
+}
+
+/**
+ * Pick the ONE model Spectre reasons + uses tools with, persist it into
+ * litellm-config.yaml's `spectre-default`, and TEST it so chat works the moment
+ * the stack is up. Three paths:
+ *   - Local Ollama (recommended, no keys): use an installed model, or pull a
+ *     small capable one; then ping it directly on the host to confirm it answers.
+ *   - An API model (bring a key): persist the key, then a cheap auth check.
+ * `spectre-default` is ALWAYS a gateway-backed model (Ollama/API), never a
+ * subscription CLI -- so the default route can never land on a token-less CLI
+ * brain (the "run failed" trap). CLI subscriptions are set up in the next step
+ * as ADDITIONAL brains, not the default. More models are added later in Settings.
  */
 async function setupBrainModel(rl, ask, v, chatModels, guide, dryRun) {
   console.log("");
   console.log(C.dim("  " + "-".repeat(56)));
   console.log(C.b("  Brain model (the ONE Spectre thinks with)"));
-  console.log(C.dim("   What Spectre reasons + calls tools with."));
-  console.log(C.dim("   Add or switch more later in Settings -> Providers."));
+  console.log(C.dim("   What Spectre reasons + calls tools with. This becomes the working default;"));
+  console.log(C.dim("   chat uses it out of the box. Add or switch more later in Settings -> Providers."));
+  console.log(C.dim("   Paths: local Ollama (no keys, recommended) or an API model (bring a key)."));
+  console.log(C.dim("   (CLI subscriptions -- Claude/Codex/Gemini -- are optional extra brains set up next.)"));
+  const ollamaHere = detectBin("ollama").found;
   await guide?.narrate(
-    "Now the brain model -- the ONE model Spectre thinks and uses tools with. " +
-    "A local Ollama model needs no keys; or bring a hosted API model via a key. " +
-    "Only one is set now; more get added in Settings.",
+    "Now the brain model -- the ONE model Spectre thinks and uses tools with, and the working " +
+    "default for chat. Recommend a local Ollama model (no keys, runs on this machine); or they " +
+    "can bring a hosted API model with a key. The installer TESTS whatever they pick so chat works " +
+    "right away. Only one is set now; more get added in Settings.",
   );
 
+  if (!ollamaHere && !chatModels.length) {
+    console.log(C.warn("   ! Ollama isn't installed -- the no-keys local path needs it."));
+    console.log(C.dim("     Install it from https://ollama.com/download, then re-run to pull a model,"));
+    console.log(C.dim("     or choose the API path below."));
+  }
+
   const opts = chatModels.map((m) => ({ label: `${m}  ${C.dim("(local Ollama)")}`, kind: "ollama", id: m }));
-  opts.push({ label: "pull a local Ollama model", kind: "pull" });
+  opts.push({ label: `pull a small local model (recommended: ${RECOMMENDED_PULL})`, kind: "pull" });
   opts.push({ label: "an API model (provider id + key)", kind: "api" });
+  // Recommended is always opts[0]: the first installed local model, or the "pull
+  // a small model" option when the user has none yet.
   opts.forEach((o, i) => console.log(`   ${C.dim(`${i + 1})`)} ${o.label}${i === 0 ? C.ok("   < recommended") : ""}`));
   const pick = (await ask(`Brain model [1-${opts.length}]`, "1")).trim();
   const idx = Number(pick) - 1;
   const choice = Number.isInteger(idx) && opts[idx] ? opts[idx] : opts[0];
 
   let spec;
+  let test = null; // { kind: "ollama"|"api", name?, model?, keyEnv? } -- what to ping after wiring
   if (choice.kind === "api") {
     const model = await ask("Provider model id (e.g. anthropic/claude-sonnet-4-6)", "anthropic/claude-sonnet-4-6");
     const keyEnv = await ask("Env var holding its API key", brainKeyEnv(model));
@@ -936,39 +1003,67 @@ async function setupBrainModel(rl, ask, v, chatModels, guide, dryRun) {
       if (key) v[keyEnv] = key;
     }
     spec = { model, api_key_env: keyEnv };
+    test = { kind: "api", model, keyEnv };
   } else {
     let name = choice.id;
     if (choice.kind === "pull") {
-      name = (await ask("Ollama model to pull", "qwen2.5:7b-instruct")).trim() || "qwen2.5:7b-instruct";
+      name = (await ask("Ollama model to pull", RECOMMENDED_PULL)).trim() || RECOMMENDED_PULL;
       if (!dryRun) {
         if (!detectBin("ollama").found) {
-          console.log(C.warn("   Ollama isn't installed (https://ollama.com/download) -- install it and pull the model later; it'll be used on next start."));
+          console.log(C.warn(`   Ollama isn't installed (https://ollama.com/download) -- install it and pull \`${name}\` (or the lighter \`${RECOMMENDED_PULL_FALLBACK}\`) later; it'll be used on next start.`));
         } else {
+          console.log(C.dim(`   Pulling ${name} (this can take a few minutes the first time)...`));
           try {
             execSync(`ollama pull ${name}`, { stdio: "inherit" });
           } catch {
-            console.log(C.warn("   pull failed -- you can pull it later and it'll be used on next start."));
+            console.log(C.warn(`   pull failed -- try \`ollama pull ${name}\` (or the lighter \`${RECOMMENDED_PULL_FALLBACK}\`) later; it'll be used on next start.`));
           }
         }
       }
     }
     spec = { model: `ollama_chat/${name}`, api_base: "http://host.docker.internal:11434" };
+    test = { kind: "ollama", name };
   }
 
   v.SPECTRE_LITELLM_MODEL = "spectre-default"; // friendly id; the backing model lives in the yaml
   if (dryRun) {
-    console.log(C.dim(`   --dry-run: would set spectre-default -> ${spec.model}`));
-  } else {
-    const set = setBrainModelYaml(spec);
-    console.log(
-      set
-        ? C.ok(`   + brain model set: ${C.b(spec.model)}`) +
-            C.dim("  (litellm-config.yaml - spectre-default - change/add anytime in Settings)")
-        : C.warn("   ! litellm-config.yaml not found -- set the spectre-default entry manually."),
-    );
+    console.log(C.dim(`   --dry-run: would set spectre-default -> ${spec.model} (and test it)`));
+    return;
   }
+
+  const set = setBrainModelYaml(spec);
+  console.log(
+    set
+      ? C.ok(`   + brain model set: ${C.b(spec.model)}`) +
+          C.dim("  (litellm-config.yaml - spectre-default - change/add anytime in Settings)")
+      : C.warn("   ! litellm-config.yaml not found -- set the spectre-default entry manually."),
+  );
+
+  // ---- test the configured brain so we don't ship a dead chat -----------------
+  // We test the BACKING model directly (Ollama daemon / provider API): the LiteLLM
+  // gateway isn't up yet during setup and only proxies to these anyway.
+  console.log(C.dim("   Testing the brain..."));
+  const result = test.kind === "ollama"
+    ? await testOllamaChat(test.name)
+    : await testApiBrain(test.model, test.keyEnv, v);
+
+  if (result.ok) {
+    console.log(C.ok("   + brain test passed") + C.dim(`  (${result.detail})`));
+  } else {
+    console.log(C.warn(`   ! brain test did not pass -- ${result.detail}`));
+    if (test.kind === "ollama") {
+      console.log(C.dim(`     Chat may fail until this model is pulled + Ollama is running. Fix:`));
+      console.log(C.dim(`       ollama pull ${test.name}   (or a lighter one: ollama pull ${RECOMMENDED_PULL_FALLBACK})`));
+      console.log(C.dim(`     Then retry chat, or pick another model in Settings -> Providers.`));
+    } else {
+      console.log(C.dim("     Double-check the API key (Settings -> Providers), or switch models there."));
+    }
+  }
+
   await guide?.narrate(
-    `The user set ${spec.model} as Spectre's brain. Reassure them it's saved and that more models are added anytime in Settings.`,
+    result.ok
+      ? `The user set ${spec.model} as Spectre's brain and the installer's test call succeeded. In one warm sentence, confirm chat will work as soon as the stack is up, and that more models are added anytime in Settings.`
+      : `The user set ${spec.model} as Spectre's brain but the installer's test call failed (${result.detail}). In one or two calm sentences, reassure them it's saved, tell them chat may not work until the model/key is fixed, and that they can retry or pick another model in Settings.`,
   );
 }
 

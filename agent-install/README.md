@@ -37,7 +37,9 @@ This is the playbook an AI CLI follows to install Spectre Agent from the officia
    node installer/install.mjs
    ```
 
-   Brief the human first: the wizard asks which database to use, which model path to use, which profile to install, and which PIN to set. Bundled local Postgres, local Ollama, and the Standard profile are normal defaults. The raw PIN is never stored; only `PIN_HASH` is written to `.env.docker`.
+   Brief the human first: the wizard asks which database to use, which **brain model** to use, which profile to install, and which PIN to set. Bundled local Postgres, local Ollama, and the Standard profile are normal defaults. The raw PIN is never stored; only `PIN_HASH` is written to `.env.docker`.
+
+   **Choosing + testing a brain model** (this is what makes chat work out of the box): at the brain-model step the wizard offers a local Ollama model (recommended, no keys) or an API model (bring a key). If the human has no suitable local model, the wizard offers to **pull a small capable one** (e.g. `qwen2.5:7b-instruct`, or the lighter `llama3.2:3b`) and waits for it. It then wires the choice into `spectre-default` and **runs a quick test** — a one-token ping at the local Ollama daemon, or a key-auth check for an API provider — and reports pass or fail. If the test fails, the wizard prints the fix (usually `ollama pull <model>`); the human can also change the model later in **Settings → Providers**. The default brain is always a gateway-backed model, never a subscription CLI, so chat never lands on an unconfigured CLI. Do not paste a model choice for the human — hand them the terminal.
 
 5. Set up always-on startup using the matching OS file:
 
@@ -51,7 +53,9 @@ This is the playbook an AI CLI follows to install Spectre Agent from the officia
    docker compose --env-file .env.docker ps
    ```
 
-7. Report the install directory, chosen profile if known, startup mechanism, and the correct local URL.
+7. (Optional) Set up remote access from a phone or another computer over the tailnet: [tailnet.md](./tailnet.md). HTTPS is required there or PIN login loops.
+
+8. Report the install directory, chosen profile if known, the brain model chosen (and whether its test passed) if known, startup mechanism, and the correct local URL.
 
 ## Verify
 
@@ -68,6 +72,12 @@ http://127.0.0.1:8787
 ```
 
 The human signs in with the PIN they typed during the wizard. Do not promise to recover or report it.
+
+## Remote access (phone + desktop)
+
+Loopback (`http://127.0.0.1:3100`) works on the host machine only. To reach Spectre from a phone or another computer, put it behind HTTPS on your private Tailscale network: [tailnet.md](./tailnet.md).
+
+HTTPS is not optional there — Spectre's session cookie is `Secure`, so browsers drop it over plain HTTP on any non-`localhost` hostname and PIN login loops. `tailscale serve` provides the HTTPS front door (tailnet-only, no public exposure). Confirm with the human before `sudo tailscale up`, and never enter or print the PIN.
 
 ## Update
 
