@@ -128,8 +128,12 @@ const server = createServer(async (req, res) => {
     if (!["both", "core", "shell"].includes(target)) {
       return json(res, 400, { error: "target must be both, core or shell" });
     }
-    // Fire and forget — the shell polls /status for progress.
-    void runScript(["--apply", "--target", target], { kind: "apply", target });
+    // Fire and forget — the shell polls /status for progress. `--force` so the
+    // rebuild ALWAYS runs: the banner fires on a stale IMAGE (baked SHA < origin),
+    // which can be true even when the host checkout already == origin (nothing to
+    // pull). The pull stays --ff-only inside; force only bypasses the "not behind"
+    // bail so the images get rebuilt at the current commit.
+    void runScript(["--apply", "--target", target, "--force"], { kind: "apply", target });
     return json(res, 202, { accepted: true, target });
   }
 
