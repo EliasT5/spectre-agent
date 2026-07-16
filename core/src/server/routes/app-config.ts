@@ -22,6 +22,10 @@ const PUBLIC_CONFIG_KEYS = new Set([
   "reasoning_effort",
   // User-defined model display-name overrides for the picker: { "<model id>": "Name" }.
   "model_labels",
+  // Per-model capability grants: { "<model id>"|"_default": { mode:"all"|"allow", tools:string[] } }.
+  // Trims the tool surface a given model sees at turn time (fed in as toolAllowlist,
+  // dot-form catalog names like "memory.search"). "all"/absent = unrestricted.
+  "model_capabilities",
 ]);
 
 appConfig.get("/:key", async (c) => {

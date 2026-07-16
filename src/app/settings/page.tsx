@@ -63,6 +63,16 @@ type BackendRow = {
   command?: string;
   server?: { status?: string; port?: number; error?: string };
 };
+type ToolRow = {
+  name: string;
+  category?: string;
+  description?: string;
+};
+type ModelCapability = {
+  mode: "all" | "allow";
+  tools?: string[];
+};
+type ModelCapabilityMap = Record<string, ModelCapability>;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -112,6 +122,9 @@ export default function SettingsTab() {
   const [orchestrate, setOrchestrate] = useState(false);
   const [orchTargets, setOrchTargets] = useState<string[]>([]);
   const [compSaved, setCompSaved] = useState(false);
+  const [capabilities, setCapabilities] = useState<ModelCapabilityMap>({});
+  const [capModel, setCapModel] = useState("_default");
+  const [mcpTools, setMcpTools] = useState<ToolRow[]>([]);
 
   // Reasoning effort (persisted to app_config.reasoning_effort)
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
@@ -911,6 +924,29 @@ export default function SettingsTab() {
     }
   }
 
+  async function loadModelCapabilities() {
+    try {
+      const r = await fetch("/api/app-config/model_capabilities");
+      if (!r.ok) return;
+      const v = (await r.json()).value;
+      const parsed = typeof v === "string" ? JSON.parse(v) : v;
+      if (parsed && typeof parsed === "object") setCapabilities(parsed as ModelCapabilityMap);
+    } catch {
+      /* fail-soft */
+    }
+  }
+
+  async function loadMcpTools() {
+    try {
+      const r = await fetch("/api/mcp");
+      if (!r.ok) return;
+      const j = (await r.json()) as { servers?: Array<{ tools?: ToolRow[] }> };
+      setMcpTools(j.servers?.[0]?.tools ?? []);
+    } catch {
+      /* fail-soft */
+    }
+  }
+
   useEffect(() => {
     void (async () => {
       const [hRes, cRes, aRes, orchRes, targRes, effortRes] = await Promise.all([
@@ -963,6 +999,8 @@ export default function SettingsTab() {
   useEffect(() => {
     void loadBackends();
     void loadModelLabels();
+    void loadModelCapabilities();
+    void loadMcpTools();
   }, []);
 
   useEffect(() => {
@@ -1053,6 +1091,20 @@ export default function SettingsTab() {
     }
   }
 
+  async function saveModelCapabilities(next: ModelCapabilityMap) {
+    setCapabilities(next);
+    try {
+      await fetch("/api/app-config/model_capabilities", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: JSON.stringify(next) }),
+      });
+      flashCompSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save model capabilities.");
+    }
+  }
+
   function flashCompSaved() {
     setCompSaved(true);
     setTimeout(() => setCompSaved(false), 1500);
@@ -1081,6 +1133,30 @@ export default function SettingsTab() {
       ? orchTargets.filter((t) => t !== id)
       : [...orchTargets, id];
     void saveOrchTargets(next);
+  }
+
+  function setCapabilityMode(key: string, mode: ModelCapability["mode"]) {
+    const current = capabilities[key];
+    const next: ModelCapabilityMap = {
+      ...capabilities,
+      [key]: mode === "all"
+        ? { mode: "all" as const }
+        : { mode: "allow" as const, tools: current?.tools ?? [] },
+    };
+    void saveModelCapabilities(next);
+  }
+
+  function toggleCapabilityTool(key: string, tool: string) {
+    const current = capabilities[key];
+    const selected = new Set(current?.tools ?? []);
+    if (selected.has(tool)) selected.delete(tool);
+    else selected.add(tool);
+    const nextTools = mcpTools.map((t) => t.name).filter((name) => selected.has(name));
+    const next: ModelCapabilityMap = {
+      ...capabilities,
+      [key]: { mode: "allow" as const, tools: nextTools },
+    };
+    void saveModelCapabilities(next);
   }
 
   // Group models by provider for the Models panel
@@ -1114,6 +1190,20 @@ export default function SettingsTab() {
     }
     return Array.from(map.entries());
   }, [specialists]);
+
+  const toolGroups = useMemo(() => {
+    const map = new Map<string, ToolRow[]>();
+    for (const t of mcpTools) {
+      const category = t.category || "Other";
+      const list = map.get(category) ?? [];
+      list.push(t);
+      map.set(category, list);
+    }
+    return Array.from(map.entries());
+  }, [mcpTools]);
+
+  const selectedCapability: ModelCapability = capabilities[capModel] ?? { mode: "all" };
+  const selectedCapabilityTools = selectedCapability.tools ?? [];
 
   const autoActive = defaultModel === "";
 
@@ -1297,6 +1387,98 @@ export default function SettingsTab() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+
+        <div className="settings-card hud">
+          <div className="glass-fresnel" aria-hidden />
+          <div className="settings-card-head">
+            <span className="settings-icon-badge">
+              <ShieldCheck strokeWidth={1.6} />
+            </span>
+            <div className="settings-card-titles">
+              <span className="settings-card-eyebrow">PER-MODEL TOOLS</span>
+              <h2 className="settings-card-title">Per-model capability</h2>
+            </div>
+            {compSaved && <SavedTag />}
+          </div>
+          <div className="settings-card-body">
+            <p className="settings-card-hint">
+              Choose which tools each model can use. Trimming the list keeps smaller local models
+              fast and focused.
+            </p>
+
+            <div className="settings-comp-sub-label">Model</div>
+            <select
+              className="settings-input"
+              value={capModel}
+              onChange={(e) => setCapModel(e.target.value)}
+              aria-label="Model capability target"
+              style={{ marginBottom: 16 }}
+            >
+              <option value="_default">Default (all other models)</option>
+              {grouped.map(([provider, list]) => (
+                <optgroup key={provider} label={VENDOR_LABELS[provider] ?? provider}>
+                  {list.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.displayName}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+
+            <div className="settings-comp-sub-label">Mode</div>
+            <div className="settings-select-list" style={{ marginBottom: 16 }}>
+              <SelectRow
+                active={selectedCapability.mode !== "allow"}
+                onClick={() => setCapabilityMode(capModel, "all")}
+                label="All tools"
+                hint="UNRESTRICTED"
+              />
+              <SelectRow
+                active={selectedCapability.mode === "allow"}
+                onClick={() => setCapabilityMode(capModel, "allow")}
+                label="Allow-listed"
+                hint={`${selectedCapabilityTools.length} TOOL${selectedCapabilityTools.length === 1 ? "" : "S"}`}
+              />
+            </div>
+
+            {selectedCapability.mode === "allow" && (
+              <div className="settings-comp-targets">
+                <div className="settings-comp-sub-label" style={{ marginTop: 16 }}>
+                  Tools
+                  <span className="settings-comp-targets-hint">
+                    {selectedCapabilityTools.length} selected
+                  </span>
+                </div>
+                {toolGroups.length ? (
+                  toolGroups.map(([category, list]) => (
+                    <div key={category} className="settings-comp-vendor-group">
+                      <div className="settings-provider-label">{category}</div>
+                      <div className="settings-select-list">
+                        {list.map((tool) => (
+                          <SelectRow
+                            key={tool.name}
+                            active={selectedCapabilityTools.includes(tool.name)}
+                            onClick={() => toggleCapabilityTool(capModel, tool.name)}
+                            label={tool.name}
+                            hint={tool.description || tool.category || "Tool"}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <span className="muted" style={{ fontSize: 13 }}>Checking tools...</span>
+                )}
+              </div>
+            )}
+
+            <p className="settings-card-hint" style={{ marginTop: 14, opacity: 0.75, fontSize: 11 }}>
+              Grants apply on gateway tool-turns; restricting a model&apos;s tools also turns off its
+              external MCP servers.
+            </p>
           </div>
         </div>
 

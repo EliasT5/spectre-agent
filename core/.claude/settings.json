@@ -1,6 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings",
-  "_comment": "Allowlist for Jerome's own self-edit Claude Code runs. Pre-approves common dev commands so the harness doesn't block on every tool use. Reads stay broad; writes/exec narrow.",
+  "_comment": "Allowlist for Spectre's own self-edit Claude Code runs. Pre-approves common dev commands so the harness doesn't block on every tool use. Reads stay broad; writes/exec narrow.",
+  "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [
       "Bash(npm install:*)",
