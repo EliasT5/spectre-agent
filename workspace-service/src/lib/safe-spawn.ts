@@ -54,7 +54,19 @@ export function buildEnv(ghToken?: string): Record<string, string> {
     const v = process.env[key];
     if (v !== undefined) env[key] = v;
   }
-  if (ghToken) env.GH_TOKEN = ghToken;
+  if (ghToken) {
+    env.GH_TOKEN = ghToken;
+    // The sandbox clone (`gh repo clone`) configures NO git credential.helper, and
+    // this container has none either — so a plain `git push`/`fetch` prompts for a
+    // username and fails non-interactively ("could not read Username"), breaking
+    // finalize. Inject a github.com credential helper via GIT_CONFIG_* (env-based so
+    // it needs no writable ~/.gitconfig); git runs the helper through a shell, which
+    // expands $GH_TOKEN from the env above. `gh` reads GH_TOKEN directly, so this
+    // only backfills the plain-git path (push/fetch).
+    env.GIT_CONFIG_COUNT = "1";
+    env.GIT_CONFIG_KEY_0 = "credential.https://github.com.helper";
+    env.GIT_CONFIG_VALUE_0 = '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f';
+  }
   return env;
 }
 

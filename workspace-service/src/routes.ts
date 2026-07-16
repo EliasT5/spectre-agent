@@ -861,6 +861,13 @@ function parseFinalizeBody(
   return { title, body, message };
 }
 
+// Spectre signs its own git work as the collaborator (not the underlying AI CLI).
+// Author identity + a co-author trailer + a PR credit line linking the agent repo.
+// Point the email at a Spectre GitHub account's no-reply address for a linked avatar.
+const SPECTRE_GIT_EMAIL = "spectre@users.noreply.github.com";
+const SPECTRE_COAUTHOR = "Co-Authored-By: Spectre <spectre@users.noreply.github.com>";
+const SPECTRE_PR_CREDIT = "Via [Spectre](https://github.com/EliasT5/spectre-agent)";
+
 workspace.post("/:id/finalize", async (c) => {
   const id = c.req.param("id");
   const r = await resolve(id);
@@ -951,12 +958,12 @@ workspace.post("/:id/finalize", async (c) => {
         "git",
         [
           "-c",
-          "user.email=spectre@local.invalid",
+          `user.email=${SPECTRE_GIT_EMAIL}`,
           "-c",
           "user.name=Spectre",
           "commit",
           "-m",
-          message,
+          `${message}\n\n${SPECTRE_COAUTHOR}`,
         ],
         { cwd: repoDir, timeout: 30_000, ghToken: ghToken() },
       );
@@ -1004,7 +1011,10 @@ workspace.post("/:id/finalize", async (c) => {
   const repoDir = r.resolved.root;
 
   const fail = (step: string, stderr: string) => {
-    updateSlot(id, { status: "failed" });
+    // Revert to 'ready', not 'failed': the repo on disk is intact and the finalize
+    // is safe to retry. A 'failed' slot was un-actionable in the UI (no editor, no
+    // retry — it just 409s), which read as a "stale slot with no repo".
+    updateSlot(id, { status: "ready" });
     return c.json({ error: `${step} failed`, stderr_tail: tail(stderr) }, 500);
   };
 
@@ -1060,7 +1070,7 @@ workspace.post("/:id/finalize", async (c) => {
       "--title",
       title,
       "--body",
-      prBody || "Created via Spectre Workspaces.",
+      prBody ? `${prBody}\n\n---\n${SPECTRE_PR_CREDIT}` : SPECTRE_PR_CREDIT,
     ],
     { cwd: repoDir, timeout: 60_000, ghToken: ghToken() },
   );

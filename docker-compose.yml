@@ -75,6 +75,10 @@ services:
       SPECTRE_ALLOW_CLAUDE_CLI: "${SPECTRE_ALLOW_CLAUDE_CLI:-}"
       SPECTRE_ALLOW_CODEX_CLI: "${SPECTRE_ALLOW_CODEX_CLI:-}"
       SPECTRE_ALLOW_GEMINI_CLI: "${SPECTRE_ALLOW_GEMINI_CLI:-}"
+      # The core runs as root in-container; claude-code 2.x refuses
+      # --dangerously-skip-permissions under root unless it's told it's sandboxed.
+      # The container IS the sandbox (isolated, own subscription), so opt in.
+      IS_SANDBOX: "1"
       # Screenshot tool → the Playwright shotter sidecar (only up with --profile screenshot);
       # default capture target is the shell UI (authed pages need SPECTRE_SHOTTER_COOKIE).
       SPECTRE_SHOTTER_URL: "http://shotter:8008/shot"
@@ -225,6 +229,25 @@ services:
     command: ["--auth", "${CODE_SERVER_AUTH:-password}", "--disable-telemetry", "--bind-addr", "0.0.0.0:8080", "/workspaces"]
     environment:
       PASSWORD: "${CODE_SERVER_PASSWORD:-}"
+      # Terminal GitHub token (from .env.docker) for `git push` / `gh`. NOTE: this
+      # container runs untrusted repo code and is browser-exposed, so holding a
+      # long-lived token here is a deliberate convenience/security trade-off — the
+      # service clone/push path does NOT rely on it (it injects per-request). gh
+      # reads GH_TOKEN/GITHUB_TOKEN directly.
+      GH_TOKEN: "${GH_TOKEN:-}"
+      GITHUB_TOKEN: "${GH_TOKEN:-}"
+      # Persistent git identity + credential helper injected via env (GIT_CONFIG_*),
+      # because $HOME here is not a volume — a `git config --global` wouldn't survive
+      # a recreate. Terminal commits are attributed to Spectre (matches the service's
+      # commit author + PR credit). The `$$` keeps `$GH_TOKEN` literal in the compose
+      # file so the shell expands it at git-run time (never baked into the config).
+      GIT_CONFIG_COUNT: "3"
+      GIT_CONFIG_KEY_0: "user.name"
+      GIT_CONFIG_VALUE_0: "Spectre"
+      GIT_CONFIG_KEY_1: "user.email"
+      GIT_CONFIG_VALUE_1: "spectre@users.noreply.github.com"
+      GIT_CONFIG_KEY_2: "credential.helper"
+      GIT_CONFIG_VALUE_2: "!f() { echo username=x-access-token; echo password=$$GH_TOKEN; }; f"
     expose: ["8080"]
     volumes:
       - "spectre-workspaces:/workspaces"
