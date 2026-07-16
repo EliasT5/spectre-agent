@@ -3,6 +3,7 @@
 import "./workspace.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { call } from "@/lib/sdk";
+import { WorkspaceChatPanel } from "./WorkspaceChatPanel";
 import {
   Boxes,
   ExternalLink,
@@ -302,18 +303,21 @@ export default function WorkspaceTab() {
               {/* Embedded VS Code (code-server) */}
               {sel.status === "ready" && (
                 <div className="ws-workarea" ref={workareaRef}>
-                  <iframe
-                    key={sel.id}
-                    src={editorUrl(sel)}
-                    title={`VS Code · ${sel.repo_name}`}
-                    className="ws-editor-iframe"
-                    allow="clipboard-read; clipboard-write; fullscreen"
-                  />
-                  {isFs && (
-                    <button type="button" className="ws-fs-exit" onClick={toggleFs}>
-                      <Minimize2 size={13} /> Exit fullscreen
-                    </button>
-                  )}
+                  <div className="ws-editor-pane">
+                    <iframe
+                      key={sel.id}
+                      src={editorUrl(sel)}
+                      title={`VS Code · ${sel.repo_name}`}
+                      className="ws-editor-iframe"
+                      allow="clipboard-read; clipboard-write; fullscreen"
+                    />
+                    {isFs && (
+                      <button type="button" className="ws-fs-exit" onClick={toggleFs}>
+                        <Minimize2 size={13} /> Exit fullscreen
+                      </button>
+                    )}
+                  </div>
+                  <WorkspaceChatPanel slot={sel} />
                 </div>
               )}
 

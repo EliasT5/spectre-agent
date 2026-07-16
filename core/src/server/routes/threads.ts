@@ -55,6 +55,19 @@ threads.get("/", async (c) => {
     query = query.eq("project_id", projectId);
   }
 
+  // ?slot= scopes to one Workspace slot's chats (threads tagged
+  // metadata.slot_id). By default the recycled ones are hidden; ?lifecycle=recycling
+  // returns just the "to be recycled" bucket for that slot.
+  const slot = c.req.query("slot");
+  if (slot) {
+    query = query.eq("metadata->>slot_id", slot);
+    if (c.req.query("lifecycle") === "recycling") {
+      query = query.eq("metadata->>lifecycle", "recycling");
+    } else {
+      query = query.or("metadata->>lifecycle.is.null,metadata->>lifecycle.neq.recycling");
+    }
+  }
+
   const { data, error } = await query;
   if (error) {
     return c.json({ error: error.message }, 500);
@@ -555,8 +568,39 @@ threads.post("/:threadId/run", async (c) => {
     reasoningEffort = effCfg?.value || undefined;
   }
 
+  // Per-model capability grant: if this model has an "allow" grant in
+  // app_config.model_capabilities, restrict its tool surface to the granted
+  // dot-form tool names (e.g. "memory.search"). Falls back to the "_default"
+  // grant; "all"/absent = unrestricted. NOTE: this only bites on the
+  // litellm/gateway provider path (streamLiteLLM) — CLI/Ollama providers ignore
+  // toolAllowlist — and setting an allowlist also disables external MCP servers
+  // for the turn (see the connectBroker gate in litellm.ts).
+  let toolAllowlist: string[] | undefined;
+  {
+    const { data: capCfg } = await supabase
+      .from("app_config")
+      .select("value")
+      .eq("key", "model_capabilities")
+      .maybeSingle();
+    const rawCap = capCfg?.value as unknown;
+    let capMap: Record<string, { mode?: string; tools?: unknown }> = {};
+    if (typeof rawCap === "string") {
+      try {
+        capMap = JSON.parse(rawCap);
+      } catch {
+        capMap = {};
+      }
+    } else if (rawCap && typeof rawCap === "object") {
+      capMap = rawCap as Record<string, { mode?: string; tools?: unknown }>;
+    }
+    const grant = capMap[model.id] ?? capMap["_default"];
+    if (grant && grant.mode === "allow" && Array.isArray(grant.tools)) {
+      toolAllowlist = (grant.tools as unknown[]).filter((t): t is string => typeof t === "string");
+    }
+  }
+
   try {
-    const chunks = streamChat({ model, system: systemPrompt, cacheBreak: stablePrompt.length, messages, threadId, reasoningEffort });
+    const chunks = streamChat({ model, system: systemPrompt, cacheBreak: stablePrompt.length, messages, threadId, reasoningEffort, ...(toolAllowlist ? { toolAllowlist } : {}) });
     for await (const chunk of chunks) {
       if (chunk.type === "token" && chunk.text) {
         fullContent += chunk.text;
